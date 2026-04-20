@@ -1615,28 +1615,20 @@ async function fetchRepoMeta(url) {
   const parsed = parseGithubUrl(url);
   if (!parsed) return null;
   const { owner, repo } = parsed;
-  const cacheKey = `garden:gh:${owner}/${repo}`;
-  try {
-    const cached = localStorage.getItem(cacheKey);
-    if (cached) {
-      const { data, t } = JSON.parse(cached);
-      if (Date.now() - t < 3600000) return data; // 1h TTL
-    }
-  } catch {}
-  const r = await fetch(`https://api.github.com/repos/${owner}/${repo}`);
-  if (!r.ok) return null;
-  const x = await r.json();
-  const data = {
-    name: x.name,
-    language: x.language,
-    stars: x.stargazers_count || 0,
-    description: x.description || "",
-    pushed: new Date(x.pushed_at).getTime(),
-    commits: Math.max(10, Math.min(400, Math.floor((x.size || 50) / 8))),
-    url: x.html_url,
-  };
-  try { localStorage.setItem(cacheKey, JSON.stringify({ data, t: Date.now() })); } catch {}
-  return data;
+  return ghCached(
+    `garden:gh:${owner}/${repo}`,
+    `https://api.github.com/repos/${owner}/${repo}`,
+    3600000,
+    (x) => ({
+      name: x.name,
+      language: x.language,
+      stars: x.stargazers_count || 0,
+      description: x.description || "",
+      pushed: new Date(x.pushed_at).getTime(),
+      commits: Math.max(10, Math.min(400, Math.floor((x.size || 50) / 8))),
+      url: x.html_url,
+    })
+  );
 }
 
 async function fetchRepos(username) {
@@ -1670,49 +1662,54 @@ const userCache = new Map();
 async function fetchUserProfile(login) {
   if (!login) return null;
   if (userCache.has(login)) return userCache.get(login);
-  const k = `garden:gh:user:${login}`;
-  try {
-    const raw = localStorage.getItem(k);
-    if (raw) {
-      const c = JSON.parse(raw);
-      if (Date.now() - c.t < 86400000) { // 24h
-        userCache.set(login, c.data);
-        return c.data;
-      }
-    }
-  } catch {}
-  try {
-    const r = await fetch(`https://api.github.com/users/${encodeURIComponent(login)}`);
-    if (!r.ok) { userCache.set(login, null); return null; }
-    const x = await r.json();
-    const data = {
+  const data = await ghCached(
+    `garden:gh:user:${login}`,
+    `https://api.github.com/users/${encodeURIComponent(login)}`,
+    86400000,
+    (x) => ({
       login,
       name: x.name || login,
       avatar_url: x.avatar_url,
       html_url: x.html_url || `https://github.com/${login}`,
-    };
-    try { localStorage.setItem(k, JSON.stringify({ data, t: Date.now() })); } catch {}
-    userCache.set(login, data);
-    return data;
-  } catch {
-    userCache.set(login, null);
-    return null;
-  }
+    })
+  );
+  userCache.set(login, data);
+  return data;
 }
 
-async function ghCached(cacheKey, url, ttl) {
+async function ghCached(cacheKey, url, ttl, transform) {
   try {
     const raw = localStorage.getItem(cacheKey);
     if (raw) {
       const c = JSON.parse(raw);
       if (Date.now() - c.t < ttl) return c.data;
+      // Expired — conditional request with ETag (304s don't count against rate limit)
+      const headers = c.etag ? { "If-None-Match": c.etag } : {};
+      try {
+        const r = await fetch(url, { headers });
+        if (r.status === 304) {
+          c.t = Date.now();
+          try { localStorage.setItem(cacheKey, JSON.stringify(c)); } catch {}
+          return c.data;
+        }
+        if (!r.ok) return c.data; // stale cache beats failure
+        const json = await r.json();
+        const data = transform ? transform(json) : json;
+        const etag = r.headers.get("ETag");
+        try { localStorage.setItem(cacheKey, JSON.stringify({ data, t: Date.now(), etag })); } catch {}
+        return data;
+      } catch {
+        return c.data; // network error — return stale cache
+      }
     }
   } catch {}
   try {
     const r = await fetch(url);
     if (!r.ok) return null;
-    const data = await r.json();
-    try { localStorage.setItem(cacheKey, JSON.stringify({ data, t: Date.now() })); } catch {}
+    const json = await r.json();
+    const data = transform ? transform(json) : json;
+    const etag = r.headers.get("ETag");
+    try { localStorage.setItem(cacheKey, JSON.stringify({ data, t: Date.now(), etag })); } catch {}
     return data;
   } catch {
     return null;
@@ -1732,40 +1729,31 @@ async function fetchContributorsApi(owner, repo) {
 }
 
 async function fetchCommitCoAuthors(owner, repo) {
-  const key = `garden:gh:coauth:${owner}/${repo}`;
-  // We store the parsed list directly (not raw commits) to keep LS small.
-  try {
-    const raw = localStorage.getItem(key);
-    if (raw) {
-      const c = JSON.parse(raw);
-      if (Date.now() - c.t < 3600000) return c.data;
+  const data = await ghCached(
+    `garden:gh:coauth:${owner}/${repo}`,
+    `https://api.github.com/repos/${owner}/${repo}/commits?per_page=100`,
+    3600000,
+    (commits) => {
+      if (!Array.isArray(commits)) return [];
+      const re = /Co-Authored-By:\s*([^<]+?)\s*<([^>]+)>/gi;
+      const noreply = /^\d+\+([^@]+)@users\.noreply\.github\.com$/i;
+      const byKey = new Map();
+      for (const c of commits) {
+        const msg = (c && c.commit && c.commit.message) || "";
+        let m;
+        while ((m = re.exec(msg)) !== null) {
+          const name = m[1].trim();
+          const email = m[2].trim().toLowerCase();
+          const nrMatch = email.match(noreply);
+          const login = nrMatch ? nrMatch[1] : null;
+          const k = login ? `login:${login}` : `email:${email}`;
+          if (!byKey.has(k)) byKey.set(k, { login, email, name });
+        }
+      }
+      return Array.from(byKey.values());
     }
-  } catch {}
-  let commits;
-  try {
-    const r = await fetch(`https://api.github.com/repos/${owner}/${repo}/commits?per_page=100`);
-    if (!r.ok) return [];
-    commits = await r.json();
-  } catch { return []; }
-  if (!Array.isArray(commits)) return [];
-  const re = /Co-Authored-By:\s*([^<]+?)\s*<([^>]+)>/gi;
-  const noreply = /^\d+\+([^@]+)@users\.noreply\.github\.com$/i;
-  const byKey = new Map();
-  for (const c of commits) {
-    const msg = (c && c.commit && c.commit.message) || "";
-    let m;
-    while ((m = re.exec(msg)) !== null) {
-      const name = m[1].trim();
-      const email = m[2].trim().toLowerCase();
-      const nrMatch = email.match(noreply);
-      const login = nrMatch ? nrMatch[1] : null;
-      const k = login ? `login:${login}` : `email:${email}`;
-      if (!byKey.has(k)) byKey.set(k, { login, email, name });
-    }
-  }
-  const list = Array.from(byKey.values());
-  try { localStorage.setItem(key, JSON.stringify({ data: list, t: Date.now() })); } catch {}
-  return list;
+  );
+  return data || [];
 }
 
 async function fetchIssueParticipants(owner, repo) {

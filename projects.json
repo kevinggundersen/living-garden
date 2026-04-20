@@ -5,6 +5,7 @@
   "projects": [
     { "url": "https://github.com/kevinggundersen/living-garden" },
     { "url": "https://github.com/kevinggundersen/thumbnail-animator" },
+    { "url": "https://github.com/kevinggundersen/global" },
 
     {
       "name": "???",
