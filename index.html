@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Living Garden</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    background: #0a1628;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: #e8e4d8;
+  }
+  canvas { display: block; cursor: default; }
+  canvas.hover { cursor: pointer; }
+
+  .controls {
+    position: fixed;
+    top: 20px;
+    left: 20px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    background: rgba(10, 20, 35, 0.55);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    padding: 10px 14px;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 13px;
+    z-index: 10;
+  }
+  .controls input {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #e8e4d8;
+    padding: 6px 10px;
+    border-radius: 8px;
+    outline: none;
+    font: inherit;
+    width: 160px;
+  }
+  .controls input:focus { border-color: rgba(255, 255, 255, 0.3); }
+  .controls button {
+    background: #c9a876;
+    color: #0a1628;
+    border: none;
+    padding: 7px 14px;
+    border-radius: 8px;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .controls button:hover { background: #d9b886; }
+  .controls .status { font-size: 11px; opacity: 0.6; margin-left: 4px; }
+
+  .info {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 300px;
+    background: rgba(10, 20, 35, 0.78);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    padding: 18px 20px;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    z-index: 10;
+    opacity: 0;
+    transform: translateY(-6px);
+    transition: opacity 0.22s ease, transform 0.22s ease, left 0.28s ease, top 0.28s ease;
+    pointer-events: none;
+  }
+  .info.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
+  .info h3 { font-size: 18px; margin-bottom: 6px; color: #f0ead8; font-weight: 600; }
+  .info .lang {
+    font-size: 11px;
+    opacity: 0.75;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .info .lang .dot { width: 9px; height: 9px; border-radius: 50%; }
+  .info p {
+    font-size: 13px;
+    line-height: 1.55;
+    opacity: 0.85;
+    margin-bottom: 14px;
+  }
+  .info .stats {
+    display: flex;
+    gap: 14px;
+    font-size: 12px;
+    opacity: 0.7;
+    margin-bottom: 14px;
+  }
+  .info a {
+    display: inline-block;
+    color: #c9a876;
+    text-decoration: none;
+    border-bottom: 1px solid rgba(201, 168, 118, 0.35);
+    font-size: 13px;
+    padding-bottom: 1px;
+  }
+  .info a:hover { border-bottom-color: #c9a876; }
+
+  .hint {
+    position: fixed;
+    bottom: 22px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 12px;
+    opacity: 0.45;
+    pointer-events: none;
+    letter-spacing: 0.3px;
+  }
+
+  .identity {
+    position: fixed;
+    bottom: 22px;
+    left: 22px;
+    font-size: 12px;
+    opacity: 0.5;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  .identity strong { color: #c9a876; font-weight: 600; letter-spacing: 0.5px; text-transform: none; }
+</style>
+</head>
+<body>
+  <canvas id="garden"></canvas>
+
+  <div class="controls">
+    <span>🌱</span>
+    <input id="username" placeholder="your github handle" />
+    <button id="grow">Grow</button>
+    <span class="status" id="status">showing demo garden</span>
+  </div>
+
+  <div class="info" id="info">
+    <h3 id="i-name"></h3>
+    <div class="lang"><span class="dot" id="i-dot"></span><span id="i-lang"></span></div>
+    <p id="i-desc"></p>
+    <div class="stats" id="i-stats"></div>
+    <a id="i-link" href="" target="_blank" rel="noopener">Visit repo →</a>
+  </div>
+
+  <div class="hint">hover a plant · click to open · each repo grows with its activity</div>
+  <div class="identity">a garden by <strong>you</strong></div>
+
+<script>
+"use strict";
+
+// ============================================================
+// LIVING GARDEN
+// Each repo becomes a plant. Code size -> height. Language -> color.
+// Stars -> orbiting fireflies. Recent pushes -> blooming glow.
+// Day/night tracks the viewer's local clock.
+// ============================================================
+
+// ---------- language palette (GitHub-ish) ----------
+const LANG_COLORS = {
+  JavaScript: "#f1e05a",
+  TypeScript: "#3178c6",
+  Python: "#3572A5",
+  Rust: "#dea584",
+  Go: "#00ADD8",
+  HTML: "#e34c26",
+  CSS: "#563d7c",
+  Ruby: "#701516",
+  Java: "#b07219",
+  "C++": "#f34b7d",
+  C: "#bbbbbb",
+  Swift: "#FA7343",
+  Kotlin: "#A97BFF",
+  Shell: "#89e051",
+  Vue: "#41b883",
+  Svelte: "#ff3e00",
+  Haskell: "#5e5086",
+  Elixir: "#6e4a7e",
+  Lua: "#000080",
+  PHP: "#4F5D95",
+  "C#": "#178600",
+  Dart: "#00B4AB",
+  Zig: "#ec915c",
+};
+
+// ---------- helpers ----------
+function hashStr(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+function mulberry32(seed) {
+  return function () {
+    let t = (seed += 0x6d2b79f5);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function lerp(a, b, t) { return a + (b - a) * t; }
+function hexToRgb(h) {
+  const n = parseInt(h.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+function mixHex(h1, h2, t) {
+  const a = hexToRgb(h1), b = hexToRgb(h2);
+  const r = Math.round(lerp(a[0], b[0], t));
+  const g = Math.round(lerp(a[1], b[1], t));
+  const bl = Math.round(lerp(a[2], b[2], t));
+  return `rgb(${r},${g},${bl})`;
+}
+
+// ---------- demo data ----------
+function daysAgo(n) { return Date.now() - n * 86400000; }
+const DEMO_REPOS = [
+  { name: "starfall-engine", language: "Rust", stars: 42, description: "Tiny 2D game engine with hot-reloading shaders.", pushed: daysAgo(2), commits: 220, url: "#" },
+  { name: "pocket-shader", language: "TypeScript", stars: 18, description: "WebGL shader playground that fits in your pocket.", pushed: daysAgo(8), commits: 110, url: "#" },
+  { name: "lantern-notes", language: "Svelte", stars: 7, description: "Minimalist markdown notes with glowing links.", pushed: daysAgo(120), commits: 70, url: "#" },
+  { name: "tide-forecaster", language: "Python", stars: 24, description: "Surf & tide predictions pulled from NOAA.", pushed: daysAgo(60), commits: 160, url: "#" },
+  { name: "opal-cli", language: "Go", stars: 11, description: "Beautiful prompts and widgets for the terminal.", pushed: daysAgo(5), commits: 90, url: "#" },
+  { name: "moth-algebra", language: "Haskell", stars: 3, description: "Category theory experiments, one morpheme at a time.", pushed: daysAgo(220), commits: 35, url: "#" },
+  { name: "quiet-coast", language: "JavaScript", stars: 55, description: "Ambient audio generator for focused work.", pushed: daysAgo(45), commits: 240, url: "#" },
+  { name: "fernwell", language: "CSS", stars: 2, description: "A design system for calm, readable interfaces.", pushed: daysAgo(14), commits: 50, url: "#" },
+];
+
+// ---------- Plant ----------
+class Plant {
+  constructor(repo, x, groundY) {
+    this.repo = repo;
+    this.x = x;
+    this.groundY = groundY;
+    const rnd = mulberry32(hashStr(repo.name));
+
+    const daysSince = (Date.now() - repo.pushed) / 86400000;
+    this.vigor = Math.max(0.35, Math.min(1, 1 - daysSince / 365));
+    this.recent = daysSince < 30;
+
+    this.maxHeight = 95 + Math.log(repo.commits + 1) * 22;
+    this.height = 6;
+    this.stemWidth = 2.2 + Math.log(repo.commits + 1) * 0.38;
+
+    this.color = LANG_COLORS[repo.language] || "#e78aa8";
+    this.flowerInner = mixHex(this.color, "#ffffff", 0.45);
+    this.swaySeed = rnd() * Math.PI * 2;
+    this.swayAmount = 0.045 + rnd() * 0.08;
+
+    const leafCount = 3 + Math.floor(rnd() * 4);
+    this.leaves = [];
+    for (let i = 0; i < leafCount; i++) {
+      this.leaves.push({
+        pos: 0.18 + (i / leafCount) * 0.6 + (rnd() - 0.5) * 0.08,
+        side: i % 2 === 0 ? 1 : -1,
+        size: 7 + rnd() * 5,
+      });
+    }
+
+    this.flower = {
+      size: 8 + rnd() * 7,
+      petals: 5 + Math.floor(rnd() * 4),
+      phase: rnd() * Math.PI * 2,
+    };
+
+    this.fireflies = [];
+    const ffCount = Math.min(8, Math.floor(Math.log2(repo.stars + 2)));
+    for (let i = 0; i < ffCount; i++) {
+      this.fireflies.push({
+        phase: rnd() * Math.PI * 2,
+        speed: 0.3 + rnd() * 0.4,
+        orbitA: 32 + rnd() * 25,
+        orbitB: 18 + rnd() * 18,
+        blink: rnd() * Math.PI * 2,
+      });
+    }
+
+    this.hit = { x, y: groundY, r: 0 };
+  }
+
+  grow() {
+    if (this.height < this.maxHeight) {
+      this.height += (this.maxHeight - this.height) * 0.025;
+    }
+  }
+
+  getStemPoints(t, wind) {
+    const pts = [];
+    const baseSway = Math.sin(t * 0.001 + this.swaySeed) * this.swayAmount;
+    const gust = wind * 0.18;
+    const segments = 10;
+    for (let i = 0; i <= segments; i++) {
+      const p = i / segments;
+      const offset = (baseSway + gust) * Math.pow(p, 1.7) * this.height * 0.35;
+      pts.push({ x: this.x + offset, y: this.groundY - this.height * p });
+    }
+    return pts;
+  }
+
+  draw(ctx, t, wind, isHover, isNight) {
+    const pts = this.getStemPoints(t, wind);
+    const tip = pts[pts.length - 1];
+    this.hit = { x: tip.x, y: tip.y, r: this.flower.size + 14 };
+
+    // Stem
+    const stemAlpha = 0.6 + this.vigor * 0.3;
+    const stemG = Math.round(110 + this.vigor * 25);
+    ctx.strokeStyle = `rgba(60, ${stemG}, 80, ${stemAlpha})`;
+    ctx.lineWidth = this.stemWidth;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.stroke();
+
+    // Leaves
+    for (const leaf of this.leaves) {
+      const idx = Math.floor(leaf.pos * (pts.length - 1));
+      const p = pts[idx];
+      const prev = pts[Math.max(0, idx - 1)];
+      const angle = Math.atan2(p.y - prev.y, p.x - prev.x) + Math.PI / 2;
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(angle + leaf.side * 0.9 + Math.sin(t * 0.0012 + this.swaySeed) * 0.08);
+      ctx.fillStyle = `rgba(80, ${Math.round(140 + this.vigor * 30)}, 90, ${stemAlpha})`;
+      ctx.beginPath();
+      ctx.ellipse(leaf.side * leaf.size * 0.8, 0, leaf.size, leaf.size * 0.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Flower
+    if (this.height > this.maxHeight * 0.3) {
+      const bloomP = Math.min(1, (this.height - this.maxHeight * 0.3) / (this.maxHeight * 0.7));
+      const size = this.flower.size * bloomP * (isHover ? 1.18 : 1);
+      ctx.save();
+      ctx.translate(tip.x, tip.y);
+      ctx.rotate(this.flower.phase + t * 0.00015);
+
+      // Bloom glow
+      if (isHover || this.recent) {
+        const glowR = size * 3;
+        const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, glowR);
+        grad.addColorStop(0, this.color + (isHover ? "aa" : "55"));
+        grad.addColorStop(1, this.color + "00");
+        ctx.fillStyle = grad;
+        ctx.fillRect(-glowR, -glowR, glowR * 2, glowR * 2);
+      }
+
+      // Petals
+      for (let i = 0; i < this.flower.petals; i++) {
+        const a = (i / this.flower.petals) * Math.PI * 2;
+        ctx.save();
+        ctx.rotate(a);
+        ctx.fillStyle = this.color;
+        ctx.beginPath();
+        ctx.ellipse(size * 0.7, 0, size * 0.7, size * 0.4, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // Center
+      ctx.fillStyle = this.flowerInner;
+      ctx.beginPath();
+      ctx.arc(0, 0, size * 0.38, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    // Fireflies (stars)
+    for (const f of this.fireflies) {
+      const angle = t * 0.001 * f.speed + f.phase;
+      const fx = tip.x + Math.cos(angle) * f.orbitA;
+      const fy = tip.y + Math.sin(angle) * f.orbitB - 10;
+      const blink = 0.5 + 0.5 * Math.sin(t * 0.003 + f.blink);
+      const alpha = isNight ? 0.45 + blink * 0.55 : 0.25 + blink * 0.25;
+      if (isNight) {
+        const g = ctx.createRadialGradient(fx, fy, 0, fx, fy, 14);
+        g.addColorStop(0, `rgba(255, 240, 180, ${alpha * 0.55})`);
+        g.addColorStop(1, "rgba(255, 240, 180, 0)");
+        ctx.fillStyle = g;
+        ctx.fillRect(fx - 14, fy - 14, 28, 28);
+      }
+      ctx.fillStyle = `rgba(255, 240, 180, ${alpha})`;
+      ctx.beginPath();
+      ctx.arc(fx, fy, 1.8 + blink * 1.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  hitTest(x, y) {
+    const dx = x - this.hit.x;
+    const dy = y - this.hit.y;
+    return dx * dx + dy * dy < this.hit.r * this.hit.r;
+  }
+}
+
+// ---------- Butterfly ----------
+class Butterfly {
+  constructor(w, h) {
+    this.x = Math.random() * w;
+    this.y = h * 0.25 + Math.random() * h * 0.4;
+    this.vx = (Math.random() - 0.5) * 0.6;
+    this.vy = (Math.random() - 0.5) * 0.3;
+    this.flap = Math.random() * Math.PI * 2;
+    this.color = ["#f4a261", "#e9c46a", "#c77dff", "#ffafcc", "#90dbf4"][
+      Math.floor(Math.random() * 5)
+    ];
+    this.size = 5 + Math.random() * 3;
+  }
+
+  update(w, h) {
+    this.vx += (Math.random() - 0.5) * 0.08;
+    this.vy += (Math.random() - 0.5) * 0.06 - 0.004;
+    this.vx = Math.max(-1.4, Math.min(1.4, this.vx * 0.98));
+    this.vy = Math.max(-1, Math.min(1, this.vy * 0.98));
+    this.x += this.vx;
+    this.y += this.vy;
+    if (this.x < -30) this.x = w + 30;
+    if (this.x > w + 30) this.x = -30;
+    if (this.y < h * 0.1) this.vy += 0.1;
+    if (this.y > h * 0.72) this.vy -= 0.1;
+    this.flap += 0.32;
+  }
+
+  draw(ctx) {
+    const wing = Math.sin(this.flap) * 0.5 + 0.5;
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.fillStyle = this.color + "cc";
+    ctx.beginPath();
+    ctx.ellipse(-this.size * wing, -this.size * 0.3, this.size, this.size * wing, 0, 0, Math.PI * 2);
+    ctx.ellipse(this.size * wing, -this.size * 0.3, this.size, this.size * wing, 0, 0, Math.PI * 2);
+    ctx.ellipse(-this.size * wing * 0.8, this.size * 0.3, this.size * 0.7, this.size * wing * 0.7, 0, 0, Math.PI * 2);
+    ctx.ellipse(this.size * wing * 0.8, this.size * 0.3, this.size * 0.7, this.size * wing * 0.7, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(40, 30, 50, 0.85)";
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 1.2, this.size * 0.8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+// ---------- Garden ----------
+class Garden {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext("2d");
+    this.plants = [];
+    this.butterflies = [];
+    this.pollen = [];
+    this.mouse = { x: -9999, y: -9999 };
+    this.hoverPlant = null;
+    this.wind = 0;
+    this.windTarget = 0;
+
+    this.resize();
+    window.addEventListener("resize", () => this.resize());
+    canvas.addEventListener("mousemove", (e) => {
+      const r = canvas.getBoundingClientRect();
+      this.mouse.x = e.clientX - r.left;
+      this.mouse.y = e.clientY - r.top;
+    });
+    canvas.addEventListener("mouseleave", () => {
+      this.mouse.x = -9999;
+      this.mouse.y = -9999;
+    });
+    canvas.addEventListener("click", () => {
+      if (this.hoverPlant && this.hoverPlant.repo.url && this.hoverPlant.repo.url !== "#") {
+        window.open(this.hoverPlant.repo.url, "_blank");
+      }
+    });
+  }
+
+  resize() {
+    const dpr = window.devicePixelRatio || 1;
+    this.w = window.innerWidth;
+    this.h = window.innerHeight;
+    this.canvas.width = this.w * dpr;
+    this.canvas.height = this.h * dpr;
+    this.canvas.style.width = this.w + "px";
+    this.canvas.style.height = this.h + "px";
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.groundY = this.h * 0.82;
+    this.layout();
+  }
+
+  setProjects(repos) {
+    this.repos = repos;
+    this.plants = [];
+    this.layout();
+    const bfCount = Math.min(6, Math.max(2, Math.floor(repos.length / 3)));
+    this.butterflies = Array.from({ length: bfCount }, () => new Butterfly(this.w, this.h));
+    this.pollen = Array.from({ length: 50 }, () => ({
+      x: Math.random() * this.w,
+      y: Math.random() * this.h,
+      vx: (Math.random() - 0.5) * 0.3,
+      vy: -0.1 - Math.random() * 0.25,
+      size: 1 + Math.random() * 1.5,
+      alpha: 0.18 + Math.random() * 0.4,
+    }));
+  }
+
+  layout() {
+    if (!this.repos) return;
+    const margin = 70;
+    const avail = this.w - margin * 2;
+    const step = avail / Math.max(1, this.repos.length);
+    const posFor = (name, i) => {
+      const jitter = (mulberry32(hashStr(name + "x"))() - 0.5) * step * 0.3;
+      return margin + step * (i + 0.5) + jitter;
+    };
+    if (this.plants.length === this.repos.length) {
+      // Keep existing growth state; just reposition.
+      this.plants.forEach((plant, i) => {
+        plant.x = posFor(plant.repo.name, i);
+        plant.groundY = this.groundY;
+      });
+    } else {
+      this.plants = this.repos.map((r, i) => new Plant(r, posFor(r.name, i), this.groundY));
+    }
+  }
+
+  getTimeOfDay() {
+    const d = new Date();
+    const h = d.getHours() + d.getMinutes() / 60;
+    if (h < 5) return { phase: "night" };
+    if (h < 7) return { phase: "dawn" };
+    if (h < 17) return { phase: "day" };
+    if (h < 20) return { phase: "dusk" };
+    return { phase: "night" };
+  }
+
+  drawSky(tod) {
+    const ctx = this.ctx;
+    let top, bot;
+    if (tod.phase === "night") { top = "#0a1028"; bot = "#1a2848"; }
+    else if (tod.phase === "dawn") { top = "#2a2550"; bot = "#f5a173"; }
+    else if (tod.phase === "day") { top = "#6ebedd"; bot = "#d7ecf1"; }
+    else { top = "#3a2658"; bot = "#f08c6a"; }
+
+    const g = ctx.createLinearGradient(0, 0, 0, this.h);
+    g.addColorStop(0, top);
+    g.addColorStop(1, bot);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, this.w, this.h);
+
+    // Stars
+    if (tod.phase !== "day") {
+      const starAlpha =
+        tod.phase === "night" ? 1 :
+        tod.phase === "dawn" ? 0.3 :
+        0.5;
+      for (let i = 0; i < 110; i++) {
+        const seed = mulberry32(i * 7919 + 11);
+        const sx = seed() * this.w;
+        const sy = seed() * this.h * 0.6;
+        const sSize = seed() * 1.4 + 0.3;
+        const twinkle = 0.5 + 0.5 * Math.sin(Date.now() * 0.001 + i * 0.7);
+        ctx.fillStyle = `rgba(255, 250, 220, ${starAlpha * twinkle * 0.8})`;
+        ctx.beginPath();
+        ctx.arc(sx, sy, sSize, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Sun or moon
+    const cx = this.w * 0.78;
+    const cy = this.h * 0.18;
+    if (tod.phase === "day") {
+      const g2 = ctx.createRadialGradient(cx, cy, 0, cx, cy, 90);
+      g2.addColorStop(0, "rgba(255, 245, 200, 0.7)");
+      g2.addColorStop(1, "rgba(255, 245, 200, 0)");
+      ctx.fillStyle = g2;
+      ctx.fillRect(cx - 90, cy - 90, 180, 180);
+      ctx.fillStyle = "#fff5c8";
+      ctx.beginPath();
+      ctx.arc(cx, cy, 28, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (tod.phase === "night" || tod.phase === "dusk") {
+      ctx.fillStyle = "#f0ecd8";
+      ctx.beginPath();
+      ctx.arc(cx, cy, 22, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = tod.phase === "night" ? "#0a1028" : "#3a2658";
+      ctx.beginPath();
+      ctx.arc(cx + 8, cy - 5, 20, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  drawHills(tod) {
+    const ctx = this.ctx;
+    const isDark = tod.phase === "night" || tod.phase === "dawn";
+
+    ctx.fillStyle = isDark ? "rgba(20, 35, 55, 0.7)" : "rgba(130, 170, 150, 0.5)";
+    ctx.beginPath();
+    ctx.moveTo(0, this.groundY);
+    for (let x = 0; x <= this.w; x += 20) {
+      const y = this.groundY - 62 - Math.sin(x * 0.004) * 28 - Math.sin(x * 0.012) * 12;
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(this.w, this.groundY);
+    ctx.fill();
+
+    ctx.fillStyle = isDark ? "rgba(15, 25, 45, 0.9)" : "rgba(92, 142, 112, 0.82)";
+    ctx.beginPath();
+    ctx.moveTo(0, this.groundY);
+    for (let x = 0; x <= this.w; x += 20) {
+      const y = this.groundY - 32 - Math.sin(x * 0.008 + 1) * 18 - Math.sin(x * 0.02) * 6;
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(this.w, this.groundY);
+    ctx.fill();
+  }
+
+  drawGround(tod) {
+    const ctx = this.ctx;
+    const isDark = tod.phase === "night" || tod.phase === "dawn";
+    ctx.fillStyle = isDark ? "#0f1a15" : "#3a5c3a";
+    ctx.fillRect(0, this.groundY, this.w, this.h - this.groundY);
+
+    ctx.strokeStyle = isDark ? "rgba(40, 70, 55, 0.6)" : "rgba(120, 160, 90, 0.55)";
+    ctx.lineWidth = 1;
+    const t = Date.now() * 0.001;
+    for (let i = 0; i < 220; i++) {
+      const seed = mulberry32(i * 103 + 7);
+      const gx = seed() * this.w;
+      const gh = 3 + seed() * 8;
+      const sway = Math.sin(t + i) * 1.8;
+      ctx.beginPath();
+      ctx.moveTo(gx, this.groundY);
+      ctx.lineTo(gx + sway, this.groundY - gh);
+      ctx.stroke();
+    }
+  }
+
+  tick() {
+    const t = Date.now();
+    const tod = this.getTimeOfDay();
+    const isNight = tod.phase === "night" || tod.phase === "dawn";
+
+    // Wind gusts
+    if (Math.random() < 0.002) this.windTarget = (Math.random() - 0.3) * 1.6;
+    this.wind += (this.windTarget - this.wind) * 0.02;
+    this.windTarget *= 0.99;
+
+    this.ctx.clearRect(0, 0, this.w, this.h);
+    this.drawSky(tod);
+    this.drawHills(tod);
+
+    // Pollen drift
+    for (const p of this.pollen) {
+      p.x += p.vx + this.wind * 0.6;
+      p.y += p.vy;
+      if (p.y < -10) { p.y = this.h + 10; p.x = Math.random() * this.w; }
+      if (p.x < -10) p.x = this.w + 10;
+      if (p.x > this.w + 10) p.x = -10;
+      this.ctx.fillStyle = isNight
+        ? `rgba(180, 200, 220, ${p.alpha})`
+        : `rgba(255, 250, 200, ${p.alpha})`;
+      this.ctx.beginPath();
+      this.ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      this.ctx.fill();
+    }
+
+    this.drawGround(tod);
+
+    // Hover detection (last-drawn wins so tallest/nearest doesn't always hijack)
+    this.hoverPlant = null;
+    for (const plant of this.plants) {
+      if (plant.hitTest(this.mouse.x, this.mouse.y)) this.hoverPlant = plant;
+    }
+    this.canvas.classList.toggle("hover", !!this.hoverPlant);
+
+    for (const plant of this.plants) {
+      plant.grow();
+      plant.draw(this.ctx, t, this.wind, plant === this.hoverPlant, isNight);
+    }
+
+    // Butterflies only during daylight
+    if (tod.phase !== "night") {
+      for (const b of this.butterflies) {
+        b.update(this.w, this.h);
+        b.draw(this.ctx);
+      }
+    }
+
+    // Vignette
+    const vg = this.ctx.createRadialGradient(
+      this.w / 2, this.h / 2, this.h * 0.32,
+      this.w / 2, this.h / 2, this.h * 0.85
+    );
+    vg.addColorStop(0, "rgba(0,0,0,0)");
+    vg.addColorStop(1, "rgba(0,0,0,0.42)");
+    this.ctx.fillStyle = vg;
+    this.ctx.fillRect(0, 0, this.w, this.h);
+  }
+}
+
+// ---------- GitHub fetch ----------
+async function fetchRepos(username) {
+  const r = await fetch(
+    `https://api.github.com/users/${encodeURIComponent(username)}/repos?per_page=30&sort=pushed`
+  );
+  if (!r.ok) {
+    if (r.status === 403) throw new Error("rate-limited (try again in an hour)");
+    if (r.status === 404) throw new Error("user not found");
+    throw new Error("HTTP " + r.status);
+  }
+  const data = await r.json();
+  return data
+    .filter((x) => !x.fork)
+    .slice(0, 16)
+    .map((x) => ({
+      name: x.name,
+      language: x.language,
+      stars: x.stargazers_count || 0,
+      description: x.description || "(no description)",
+      pushed: new Date(x.pushed_at).getTime(),
+      commits: Math.max(10, Math.min(400, Math.floor((x.size || 50) / 8))),
+      url: x.html_url,
+    }));
+}
+
+// ---------- App init ----------
+const garden = new Garden(document.getElementById("garden"));
+garden.setProjects(DEMO_REPOS);
+
+(function loop() {
+  garden.tick();
+  requestAnimationFrame(loop);
+})();
+
+// Info card
+const info = document.getElementById("info");
+const iName = document.getElementById("i-name");
+const iLang = document.getElementById("i-lang");
+const iDot = document.getElementById("i-dot");
+const iDesc = document.getElementById("i-desc");
+const iStats = document.getElementById("i-stats");
+const iLink = document.getElementById("i-link");
+
+function positionCard(plant) {
+  const tip = plant.hit;
+  const cardW = info.offsetWidth || 300;
+  const cardH = info.offsetHeight || 180;
+  const gap = 32;
+  let left = tip.x + gap;
+  if (left + cardW > window.innerWidth - 16) left = tip.x - gap - cardW;
+  left = Math.max(16, Math.min(window.innerWidth - cardW - 16, left));
+  let top = tip.y - cardH / 2;
+  top = Math.max(16, Math.min(window.innerHeight - cardH - 16, top));
+  info.style.left = left + "px";
+  info.style.top = top + "px";
+}
+
+let lastHover = null;
+setInterval(() => {
+  if (garden.hoverPlant !== lastHover) {
+    lastHover = garden.hoverPlant;
+    if (garden.hoverPlant) {
+      const r = garden.hoverPlant.repo;
+      iName.textContent = r.name;
+      iLang.textContent = r.language || "—";
+      iDot.style.background = LANG_COLORS[r.language] || "#e78aa8";
+      iDesc.textContent = r.description;
+      const days = Math.max(0, Math.round((Date.now() - r.pushed) / 86400000));
+      iStats.innerHTML = `<span>⭐ ${r.stars}</span><span>↻ ${days}d ago</span>`;
+      if (r.url && r.url !== "#") {
+        iLink.href = r.url;
+        iLink.style.display = "inline-block";
+      } else {
+        iLink.style.display = "none";
+      }
+      positionCard(garden.hoverPlant);
+      info.classList.add("show");
+    } else {
+      info.classList.remove("show");
+    }
+  }
+}, 80);
+
+// Grow from GitHub
+const statusEl = document.getElementById("status");
+const usernameInput = document.getElementById("username");
+const growBtn = document.getElementById("grow");
+
+async function grow() {
+  const u = usernameInput.value.trim();
+  if (!u) return;
+  statusEl.textContent = "fetching...";
+  try {
+    const repos = await fetchRepos(u);
+    if (!repos.length) {
+      statusEl.textContent = "no repos found";
+      return;
+    }
+    garden.setProjects(repos);
+    statusEl.textContent = `${repos.length} plants growing`;
+  } catch (e) {
+    statusEl.textContent = "error: " + e.message;
+  }
+}
+growBtn.addEventListener("click", grow);
+usernameInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") grow();
+});
+</script>
+</body>
+</html>
