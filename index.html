@@ -102,6 +102,15 @@
     gap: 7px;
   }
   .info .lang .dot { width: 9px; height: 9px; border-radius: 50%; }
+  .info #i-img {
+    display: none;
+    width: 100%;
+    max-height: 140px;
+    object-fit: cover;
+    border-radius: 8px;
+    margin-bottom: 12px;
+  }
+  .info #i-img.visible { display: block; }
   .info p {
     font-size: 13px;
     line-height: 1.55;
@@ -162,6 +171,7 @@
   <div class="info" id="info">
     <h3 id="i-name"></h3>
     <div class="lang"><span class="dot" id="i-dot"></span><span id="i-lang"></span></div>
+    <img id="i-img" alt="" />
     <p id="i-desc"></p>
     <div class="stats" id="i-stats"></div>
     <a id="i-link" href="" target="_blank" rel="noopener">Visit repo →</a>
@@ -1656,6 +1666,32 @@ async function fetchRepos(username) {
     }));
 }
 
+async function fetchReadmeImage(owner, repo) {
+  return ghCached(
+    `garden:gh:readme-img:${owner}/${repo}`,
+    `https://api.github.com/repos/${owner}/${repo}/readme`,
+    86400000,
+    (x) => {
+      if (!x || !x.content) return null;
+      try {
+        const md = atob(x.content.replace(/\n/g, ""));
+        // Markdown image: ![alt](url)
+        const mdMatch = md.match(/!\[[^\]]*\]\(([^)]+)\)/);
+        if (mdMatch) return resolveReadmeImg(mdMatch[1], owner, repo);
+        // HTML img tag: <img src="url">
+        const imgMatch = md.match(/<img[^>]+src=["']([^"']+)["']/i);
+        if (imgMatch) return resolveReadmeImg(imgMatch[1], owner, repo);
+        return null;
+      } catch { return null; }
+    }
+  );
+}
+
+function resolveReadmeImg(src, owner, repo) {
+  if (/^https?:\/\//i.test(src)) return src;
+  return `https://raw.githubusercontent.com/${owner}/${repo}/HEAD/${src.replace(/^\.?\/?/, "")}`;
+}
+
 // ---------- Contributor ("roots") fetch layer ----------
 // One network call per unique GitHub login across the whole garden.
 const userCache = new Map();
@@ -1836,6 +1872,15 @@ async function hydrateContributors(plant) {
   }
 }
 
+async function hydrateReadmeImage(plant) {
+  try {
+    const parsed = parseGithubUrl(plant.repo && plant.repo.url);
+    if (!parsed) return;
+    const img = await fetchReadmeImage(parsed.owner, parsed.repo);
+    if (img) plant.repo.image = img;
+  } catch {}
+}
+
 // Canvas avatar cache — in-memory HTMLImageElement per URL.
 const avatarImgs = new Map();
 function getAvatarImage(url) {
@@ -1873,6 +1918,7 @@ const iDot = document.getElementById("i-dot");
 const iDesc = document.getElementById("i-desc");
 const iStats = document.getElementById("i-stats");
 const iLink = document.getElementById("i-link");
+const iImg = document.getElementById("i-img");
 
 function positionCard(plant) {
   const tip = plant.hit;
@@ -1905,6 +1951,13 @@ setInterval(() => {
       } else {
         iLang.textContent = r.language || "—";
         iDot.style.background = LANG_COLORS[r.language] || "#e78aa8";
+      }
+      if (r.image) {
+        iImg.src = r.image;
+        iImg.classList.add("visible");
+      } else {
+        iImg.classList.remove("visible");
+        iImg.src = "";
       }
       iDesc.textContent = r.description;
       if (status === "mature") {
@@ -1946,7 +1999,7 @@ async function grow() {
     }
     garden.setProjects(repos.map(normalizeProject));
     statusEl.textContent = `${repos.length} plants growing`;
-    garden.plants.forEach((p) => { hydrateContributors(p); });
+    garden.plants.forEach((p) => { hydrateContributors(p); hydrateReadmeImage(p); });
   } catch (e) {
     statusEl.textContent = "error: " + e.message;
   }
@@ -1997,7 +2050,7 @@ async function loadDefault() {
 
     garden.setProjects(projects);
     if (data.github && !usernameInput.value) usernameInput.value = data.github;
-    garden.plants.forEach((p) => { hydrateContributors(p); });
+    garden.plants.forEach((p) => { hydrateContributors(p); hydrateReadmeImage(p); });
     const parts = [`${projects.length} plants`];
     if (hydrated) parts.push(`${hydrated} live`);
     if (failed) parts.push(`${failed} offline`);
