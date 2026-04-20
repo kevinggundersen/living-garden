@@ -1,0 +1,21 @@
+{
+  "github": "kevinggundersen",
+  "_note": "For mature repos with a GitHub URL, metadata is auto-fetched (name, language, stars, description, pushed date). Just write { \"url\": \"...\" } — any field you add here overrides the API. For projects without a repo yet, use status 'sapling' (planned) or 'seed' (earliest idea) with manual fields.",
+
+  "projects": [
+    { "url": "https://github.com/kevinggundersen/living-garden" },
+    { "url": "https://github.com/kevinggundersen/thumbnail-animator" },
+
+    {
+      "name": "???",
+      "language": "???",
+      "description": "A sapling idea.",
+      "status": "sapling"
+    },
+    {
+      "name": "???",
+      "description": "A seed idea.",
+      "status": "seed"
+    }
+  ]
+}

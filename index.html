@@ -220,7 +220,25 @@ function mixHex(h1, h2, t) {
   return `rgb(${r},${g},${bl})`;
 }
 
-// ---------- demo data ----------
+// ---------- project normalization ----------
+function normalizeProject(p) {
+  const pushed =
+    p.pushed == null ? Date.now()
+    : typeof p.pushed === "number" ? p.pushed
+    : new Date(p.pushed).getTime();
+  return {
+    name: p.name,
+    language: p.language || null,
+    stars: p.stars || 0,
+    description: p.description || "",
+    pushed,
+    commits: p.commits || 60,
+    url: p.url || "#",
+    status: p.status || "mature",
+  };
+}
+
+// ---------- demo data (fallback when projects.json is missing) ----------
 function daysAgo(n) { return Date.now() - n * 86400000; }
 const DEMO_REPOS = [
   { name: "starfall-engine", language: "Rust", stars: 42, description: "Tiny 2D game engine with hot-reloading shaders.", pushed: daysAgo(2), commits: 220, url: "#" },
@@ -228,9 +246,9 @@ const DEMO_REPOS = [
   { name: "lantern-notes", language: "Svelte", stars: 7, description: "Minimalist markdown notes with glowing links.", pushed: daysAgo(120), commits: 70, url: "#" },
   { name: "tide-forecaster", language: "Python", stars: 24, description: "Surf & tide predictions pulled from NOAA.", pushed: daysAgo(60), commits: 160, url: "#" },
   { name: "opal-cli", language: "Go", stars: 11, description: "Beautiful prompts and widgets for the terminal.", pushed: daysAgo(5), commits: 90, url: "#" },
-  { name: "moth-algebra", language: "Haskell", stars: 3, description: "Category theory experiments, one morpheme at a time.", pushed: daysAgo(220), commits: 35, url: "#" },
   { name: "quiet-coast", language: "JavaScript", stars: 55, description: "Ambient audio generator for focused work.", pushed: daysAgo(45), commits: 240, url: "#" },
-  { name: "fernwell", language: "CSS", stars: 2, description: "A design system for calm, readable interfaces.", pushed: daysAgo(14), commits: 50, url: "#" },
+  { name: "future-weave", language: "Rust", description: "A sapling I'm nurturing — tiny CRDT library for notes.", status: "sapling" },
+  { name: "quiet-seed", description: "Something's stirring underground.", status: "seed" },
 ];
 
 // ---------- Plant ----------
@@ -239,29 +257,54 @@ class Plant {
     this.repo = repo;
     this.x = x;
     this.groundY = groundY;
+    this.status = repo.status || "mature";
     const rnd = mulberry32(hashStr(repo.name));
 
-    const daysSince = (Date.now() - repo.pushed) / 86400000;
-    this.vigor = Math.max(0.35, Math.min(1, 1 - daysSince / 365));
-    this.recent = daysSince < 30;
+    const daysSince = (Date.now() - (repo.pushed || Date.now())) / 86400000;
+    this.vigor = this.status === "mature"
+      ? Math.max(0.35, Math.min(1, 1 - daysSince / 365))
+      : 1;
+    this.recent = this.status === "mature" && daysSince < 30;
 
-    this.maxHeight = 95 + Math.log(repo.commits + 1) * 22;
-    this.height = 6;
-    this.stemWidth = 2.2 + Math.log(repo.commits + 1) * 0.38;
+    if (this.status === "seed") {
+      this.maxHeight = 10 + rnd() * 8;
+      this.stemWidth = 1.2;
+    } else if (this.status === "sapling") {
+      this.maxHeight = 26 + rnd() * 14;
+      this.stemWidth = 1.6;
+    } else {
+      this.maxHeight = 95 + Math.log(repo.commits + 1) * 22;
+      this.stemWidth = 2.2 + Math.log(repo.commits + 1) * 0.38;
+    }
+    this.height = this.status === "seed" ? 1 : 4;
 
     this.color = LANG_COLORS[repo.language] || "#e78aa8";
     this.flowerInner = mixHex(this.color, "#ffffff", 0.45);
     this.swaySeed = rnd() * Math.PI * 2;
     this.swayAmount = 0.045 + rnd() * 0.08;
 
-    const leafCount = 3 + Math.floor(rnd() * 4);
     this.leaves = [];
-    for (let i = 0; i < leafCount; i++) {
-      this.leaves.push({
-        pos: 0.18 + (i / leafCount) * 0.6 + (rnd() - 0.5) * 0.08,
-        side: i % 2 === 0 ? 1 : -1,
-        size: 7 + rnd() * 5,
-      });
+    if (this.status === "seed") {
+      this.leaves.push({ pos: 0.88, side: 1, size: 4.5 });
+      this.leaves.push({ pos: 0.88, side: -1, size: 4.5 });
+    } else if (this.status === "sapling") {
+      const leafCount = 1 + Math.floor(rnd() * 2);
+      for (let i = 0; i < leafCount; i++) {
+        this.leaves.push({
+          pos: 0.45 + (i / Math.max(1, leafCount)) * 0.35,
+          side: i % 2 === 0 ? 1 : -1,
+          size: 4 + rnd() * 3,
+        });
+      }
+    } else {
+      const leafCount = 3 + Math.floor(rnd() * 4);
+      for (let i = 0; i < leafCount; i++) {
+        this.leaves.push({
+          pos: 0.18 + (i / leafCount) * 0.6 + (rnd() - 0.5) * 0.08,
+          side: i % 2 === 0 ? 1 : -1,
+          size: 7 + rnd() * 5,
+        });
+      }
     }
 
     this.flower = {
@@ -271,15 +314,17 @@ class Plant {
     };
 
     this.fireflies = [];
-    const ffCount = Math.min(8, Math.floor(Math.log2(repo.stars + 2)));
-    for (let i = 0; i < ffCount; i++) {
-      this.fireflies.push({
-        phase: rnd() * Math.PI * 2,
-        speed: 0.3 + rnd() * 0.4,
-        orbitA: 32 + rnd() * 25,
-        orbitB: 18 + rnd() * 18,
-        blink: rnd() * Math.PI * 2,
-      });
+    if (this.status === "mature") {
+      const ffCount = Math.min(8, Math.floor(Math.log2((repo.stars || 0) + 2)));
+      for (let i = 0; i < ffCount; i++) {
+        this.fireflies.push({
+          phase: rnd() * Math.PI * 2,
+          speed: 0.3 + rnd() * 0.4,
+          orbitA: 32 + rnd() * 25,
+          orbitB: 18 + rnd() * 18,
+          blink: rnd() * Math.PI * 2,
+        });
+      }
     }
 
     this.hit = { x, y: groundY, r: 0 };
@@ -307,12 +352,26 @@ class Plant {
   draw(ctx, t, wind, isHover, isNight) {
     const pts = this.getStemPoints(t, wind);
     const tip = pts[pts.length - 1];
-    this.hit = { x: tip.x, y: tip.y, r: this.flower.size + 14 };
+    const hitR = this.status === "seed" ? 14
+      : this.status === "sapling" ? 18
+      : this.flower.size + 14;
+    this.hit = { x: tip.x, y: tip.y, r: hitR };
 
-    // Stem
+    // Seed: soft soil mound at base
+    if (this.status === "seed") {
+      ctx.fillStyle = "rgba(50, 35, 25, 0.55)";
+      ctx.beginPath();
+      ctx.ellipse(this.x, this.groundY, 9, 2.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Stem (brighter green for young plants)
     const stemAlpha = 0.6 + this.vigor * 0.3;
-    const stemG = Math.round(110 + this.vigor * 25);
-    ctx.strokeStyle = `rgba(60, ${stemG}, 80, ${stemAlpha})`;
+    const young = this.status !== "mature";
+    const stemG = young ? 175 : Math.round(110 + this.vigor * 25);
+    const stemR = young ? 95 : 60;
+    const stemB = young ? 105 : 80;
+    ctx.strokeStyle = `rgba(${stemR}, ${stemG}, ${stemB}, ${stemAlpha})`;
     ctx.lineWidth = this.stemWidth;
     ctx.lineCap = "round";
     ctx.beginPath();
@@ -329,15 +388,51 @@ class Plant {
       ctx.save();
       ctx.translate(p.x, p.y);
       ctx.rotate(angle + leaf.side * 0.9 + Math.sin(t * 0.0012 + this.swaySeed) * 0.08);
-      ctx.fillStyle = `rgba(80, ${Math.round(140 + this.vigor * 30)}, 90, ${stemAlpha})`;
+      const leafR = young ? 135 : 80;
+      const leafG = young ? 205 : Math.round(140 + this.vigor * 30);
+      const leafB = young ? 125 : 90;
+      ctx.fillStyle = `rgba(${leafR}, ${leafG}, ${leafB}, ${stemAlpha})`;
       ctx.beginPath();
-      ctx.ellipse(leaf.side * leaf.size * 0.8, 0, leaf.size, leaf.size * 0.5, 0, 0, Math.PI * 2);
+      if (this.status === "seed") {
+        // Round cotyledon-like leaves
+        ctx.ellipse(leaf.side * leaf.size * 0.9, 0, leaf.size * 0.9, leaf.size * 0.75, 0, 0, Math.PI * 2);
+      } else {
+        ctx.ellipse(leaf.side * leaf.size * 0.8, 0, leaf.size, leaf.size * 0.5, 0, 0, Math.PI * 2);
+      }
       ctx.fill();
       ctx.restore();
     }
 
-    // Flower
-    if (this.height > this.maxHeight * 0.3) {
+    // Sapling: closed bud instead of flower
+    if (this.status === "sapling" && this.height > this.maxHeight * 0.5) {
+      const bloomP = Math.min(1, (this.height - this.maxHeight * 0.5) / (this.maxHeight * 0.5));
+      const pulse = 0.5 + 0.5 * Math.sin(t * 0.0018 + this.swaySeed);
+      const size = 3.8 * bloomP * (isHover ? 1.25 : 1);
+      ctx.save();
+      ctx.translate(tip.x, tip.y);
+      if (isHover || pulse > 0.6) {
+        const glowR = size * 4.5;
+        const glowA = isHover ? 0.75 : (pulse - 0.6) * 1.6;
+        const hex = Math.round(glowA * 170).toString(16).padStart(2, "0");
+        const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, glowR);
+        grad.addColorStop(0, this.color + hex);
+        grad.addColorStop(1, this.color + "00");
+        ctx.fillStyle = grad;
+        ctx.fillRect(-glowR, -glowR, glowR * 2, glowR * 2);
+      }
+      ctx.fillStyle = mixHex(this.color, "#2d4a2d", 0.4);
+      ctx.beginPath();
+      ctx.ellipse(0, -size * 0.5, size * 0.9, size * 1.6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = this.color + "bb";
+      ctx.beginPath();
+      ctx.ellipse(-size * 0.25, -size * 0.7, size * 0.35, size * 0.9, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Flower (mature only)
+    if (this.status === "mature" && this.height > this.maxHeight * 0.3) {
       const bloomP = Math.min(1, (this.height - this.maxHeight * 0.3) / (this.maxHeight * 0.7));
       const size = this.flower.size * bloomP * (isHover ? 1.18 : 1);
       ctx.save();
@@ -708,6 +803,41 @@ class Garden {
 }
 
 // ---------- GitHub fetch ----------
+function parseGithubUrl(url) {
+  if (!url || typeof url !== "string") return null;
+  const m = url.match(/github\.com\/([^\/\s?#]+)\/([^\/\s?#]+)/i);
+  if (!m) return null;
+  return { owner: m[1], repo: m[2].replace(/\.git$/i, "") };
+}
+
+async function fetchRepoMeta(url) {
+  const parsed = parseGithubUrl(url);
+  if (!parsed) return null;
+  const { owner, repo } = parsed;
+  const cacheKey = `garden:gh:${owner}/${repo}`;
+  try {
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) {
+      const { data, t } = JSON.parse(cached);
+      if (Date.now() - t < 3600000) return data; // 1h TTL
+    }
+  } catch {}
+  const r = await fetch(`https://api.github.com/repos/${owner}/${repo}`);
+  if (!r.ok) return null;
+  const x = await r.json();
+  const data = {
+    name: x.name,
+    language: x.language,
+    stars: x.stargazers_count || 0,
+    description: x.description || "",
+    pushed: new Date(x.pushed_at).getTime(),
+    commits: Math.max(10, Math.min(400, Math.floor((x.size || 50) / 8))),
+    url: x.html_url,
+  };
+  try { localStorage.setItem(cacheKey, JSON.stringify({ data, t: Date.now() })); } catch {}
+  return data;
+}
+
 async function fetchRepos(username) {
   const r = await fetch(
     `https://api.github.com/users/${encodeURIComponent(username)}/repos?per_page=30&sort=pushed`
@@ -729,12 +859,12 @@ async function fetchRepos(username) {
       pushed: new Date(x.pushed_at).getTime(),
       commits: Math.max(10, Math.min(400, Math.floor((x.size || 50) / 8))),
       url: x.html_url,
+      status: "mature",
     }));
 }
 
 // ---------- App init ----------
 const garden = new Garden(document.getElementById("garden"));
-garden.setProjects(DEMO_REPOS);
 
 (function loop() {
   garden.tick();
@@ -770,12 +900,27 @@ setInterval(() => {
     lastHover = garden.hoverPlant;
     if (garden.hoverPlant) {
       const r = garden.hoverPlant.repo;
+      const status = r.status || "mature";
       iName.textContent = r.name;
-      iLang.textContent = r.language || "—";
-      iDot.style.background = LANG_COLORS[r.language] || "#e78aa8";
+      if (status === "sapling") {
+        iLang.textContent = r.language ? `planned · ${r.language}` : "planned";
+        iDot.style.background = "#7dc36b";
+      } else if (status === "seed") {
+        iLang.textContent = "seeded";
+        iDot.style.background = "#8b6f4e";
+      } else {
+        iLang.textContent = r.language || "—";
+        iDot.style.background = LANG_COLORS[r.language] || "#e78aa8";
+      }
       iDesc.textContent = r.description;
-      const days = Math.max(0, Math.round((Date.now() - r.pushed) / 86400000));
-      iStats.innerHTML = `<span>⭐ ${r.stars}</span><span>↻ ${days}d ago</span>`;
+      if (status === "mature") {
+        const days = Math.max(0, Math.round((Date.now() - r.pushed) / 86400000));
+        iStats.innerHTML = `<span>⭐ ${r.stars}</span><span>↻ ${days}d ago</span>`;
+      } else if (status === "sapling") {
+        iStats.innerHTML = `<span>🌱 growing idea</span>`;
+      } else {
+        iStats.innerHTML = `<span>🌰 planted seed</span>`;
+      }
       if (r.url && r.url !== "#") {
         iLink.href = r.url;
         iLink.style.display = "inline-block";
@@ -805,7 +950,7 @@ async function grow() {
       statusEl.textContent = "no repos found";
       return;
     }
-    garden.setProjects(repos);
+    garden.setProjects(repos.map(normalizeProject));
     statusEl.textContent = `${repos.length} plants growing`;
   } catch (e) {
     statusEl.textContent = "error: " + e.message;
@@ -815,6 +960,46 @@ growBtn.addEventListener("click", grow);
 usernameInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") grow();
 });
+
+// ---------- Default load: projects.json → demo fallback ----------
+// Mature entries with a GitHub URL get their metadata auto-fetched
+// (language, stars, description, pushed, name). Any field you set
+// in projects.json wins over the API value.
+async function loadDefault() {
+  try {
+    const r = await fetch("projects.json", { cache: "no-store" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const data = await r.json();
+    const raw = data.projects || [];
+    if (!raw.length) throw new Error("no projects listed");
+
+    statusEl.textContent = "reading repos...";
+    let hydrated = 0, failed = 0;
+    const projects = await Promise.all(raw.map(async (p) => {
+      const status = p.status || "mature";
+      if (status === "mature" && parseGithubUrl(p.url)) {
+        try {
+          const meta = await fetchRepoMeta(p.url);
+          if (meta) { hydrated++; return normalizeProject({ ...meta, ...p }); }
+          failed++;
+        } catch { failed++; }
+      }
+      return normalizeProject(p);
+    }));
+
+    garden.setProjects(projects);
+    if (data.github && !usernameInput.value) usernameInput.value = data.github;
+    const parts = [`${projects.length} plants`];
+    if (hydrated) parts.push(`${hydrated} live`);
+    if (failed) parts.push(`${failed} offline`);
+    statusEl.textContent = parts.join(" · ");
+  } catch (e) {
+    console.warn("projects.json not loaded:", e.message);
+    garden.setProjects(DEMO_REPOS.map(normalizeProject));
+    statusEl.textContent = "demo garden (add projects.json)";
+  }
+}
+loadDefault();
 </script>
 </body>
 </html>
