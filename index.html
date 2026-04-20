@@ -54,6 +54,21 @@
     cursor: pointer;
   }
   .controls button:hover { background: #d9b886; }
+  .controls .icon-btn {
+    background: rgba(255, 255, 255, 0.06);
+    color: #e8e4d8;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 6px 10px;
+    border-radius: 8px;
+    font: inherit;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .controls .icon-btn:hover { background: rgba(255, 255, 255, 0.12); }
+  .controls .icon-btn.active {
+    background: rgba(201, 168, 118, 0.22);
+    border-color: rgba(201, 168, 118, 0.45);
+  }
   .controls .status { font-size: 11px; opacity: 0.6; margin-left: 4px; }
 
   .info {
@@ -139,6 +154,7 @@
     <span>🌱</span>
     <input id="username" placeholder="your github handle" />
     <button id="grow">Grow</button>
+    <button id="sound" class="icon-btn" title="Enable ambient sound" aria-label="Toggle ambient sound">🔇</button>
     <span class="status" id="status">showing demo garden</span>
   </div>
 
@@ -922,6 +938,7 @@ class Garden {
     const t = Date.now();
     const tod = this.getTimeOfDay();
     const isNight = tod.phase === "night" || tod.phase === "dawn";
+    this._lastTod = tod.phase;
 
     // Wind gusts
     if (Math.random() < 0.002) this.windTarget = (Math.random() - 0.3) * 1.6;
@@ -969,6 +986,179 @@ class Garden {
     vg.addColorStop(1, "rgba(0,0,0,0.42)");
     this.ctx.fillStyle = vg;
     this.ctx.fillRect(0, 0, this.w, this.h);
+  }
+}
+
+// ---------- Audio ----------
+class AudioEngine {
+  constructor() {
+    this.ctx = null;
+    this.master = null;
+    this.wind = null;
+    this.windFilter = null;
+    this.crickets = null;
+    this.enabled = false;
+    this.inited = false;
+    this._nextBird = 0;
+    this._nextOwl = 0;
+    this._season = "spring";
+    this._tod = "day";
+  }
+
+  async _init() {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return false;
+    this.ctx = new AC();
+    this.master = this.ctx.createGain();
+    this.master.gain.value = 0;
+    this.master.connect(this.ctx.destination);
+    this._setupWind();
+    this._setupCrickets();
+    this.inited = true;
+    return true;
+  }
+
+  _setupWind() {
+    const c = this.ctx;
+    const bufLen = c.sampleRate * 8;
+    const buf = c.createBuffer(1, bufLen, c.sampleRate);
+    const d = buf.getChannelData(0);
+    let last = 0;
+    for (let i = 0; i < bufLen; i++) {
+      const w = (Math.random() * 2 - 1) * 0.5;
+      last = (last + 0.02 * w) / 1.02;
+      d[i] = last * 3.0;
+    }
+    const src = c.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+    const filt = c.createBiquadFilter();
+    filt.type = "lowpass";
+    filt.frequency.value = 500;
+    filt.Q.value = 0.6;
+    const g = c.createGain();
+    g.gain.value = 0.18;
+    src.connect(filt).connect(g).connect(this.master);
+    src.start();
+    this.wind = g;
+    this.windFilter = filt;
+  }
+
+  _setupCrickets() {
+    const c = this.ctx;
+    const g = c.createGain();
+    g.gain.value = 0;
+    g.connect(this.master);
+    const freqs = [4600, 4950, 5300, 5700];
+    for (const f of freqs) {
+      const osc = c.createOscillator();
+      osc.type = "triangle";
+      osc.frequency.value = f + (Math.random() - 0.5) * 40;
+      const lfo = c.createOscillator();
+      lfo.type = "square";
+      lfo.frequency.value = 7 + Math.random() * 3;
+      const lfoGain = c.createGain();
+      lfoGain.gain.value = 0.5;
+      const amp = c.createGain();
+      amp.gain.value = 0;
+      lfo.connect(lfoGain).connect(amp.gain);
+      osc.connect(amp).connect(g);
+      osc.start();
+      lfo.start();
+    }
+    this.crickets = g;
+  }
+
+  _playBirdPhrase() {
+    if (!this.ctx || !this.enabled) return;
+    const c = this.ctx;
+    const now = c.currentTime;
+    const count = 2 + Math.floor(Math.random() * 3);
+    const base = 1800 + Math.random() * 1400;
+    for (let i = 0; i < count; i++) {
+      const t0 = now + i * (0.12 + Math.random() * 0.08);
+      const osc = c.createOscillator();
+      osc.type = "sine";
+      const startF = base + (Math.random() - 0.5) * 400;
+      const endF = startF * (0.55 + Math.random() * 0.25);
+      osc.frequency.setValueAtTime(startF, t0);
+      osc.frequency.exponentialRampToValueAtTime(endF, t0 + 0.09);
+      const g = c.createGain();
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(0.09, t0 + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.1);
+      osc.connect(g).connect(this.master);
+      osc.start(t0);
+      osc.stop(t0 + 0.12);
+    }
+  }
+
+  _playOwl() {
+    if (!this.ctx || !this.enabled) return;
+    const c = this.ctx;
+    const now = c.currentTime;
+    for (let i = 0; i < 2; i++) {
+      const t0 = now + i * 0.45;
+      const osc = c.createOscillator();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(260, t0);
+      osc.frequency.exponentialRampToValueAtTime(220, t0 + 0.35);
+      const g = c.createGain();
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(0.08, t0 + 0.06);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.4);
+      osc.connect(g).connect(this.master);
+      osc.start(t0);
+      osc.stop(t0 + 0.45);
+    }
+  }
+
+  setWind(strength) {
+    if (!this.inited || !this.windFilter) return;
+    const s = Math.min(1, Math.abs(strength) / 1.5);
+    const now = this.ctx.currentTime;
+    this.windFilter.frequency.linearRampToValueAtTime(260 + s * 620, now + 0.3);
+    this.wind.gain.linearRampToValueAtTime(0.12 + s * 0.26, now + 0.3);
+  }
+
+  setContext(tod, season) {
+    this._tod = tod;
+    this._season = season;
+    if (!this.inited || !this.crickets) return;
+    const night = tod === "night" || tod === "dawn";
+    const target = night ? (season === "summer" ? 0.06 : 0.035) : 0.0;
+    const now = this.ctx.currentTime;
+    this.crickets.gain.linearRampToValueAtTime(target, now + 1.5);
+  }
+
+  tick() {
+    if (!this.inited || !this.enabled) return;
+    const now = performance.now();
+    const day = this._tod === "day" || this._tod === "dusk";
+    const night = this._tod === "night" || this._tod === "dawn";
+
+    if (day && this._season !== "winter" && now >= this._nextBird) {
+      this._playBirdPhrase();
+      const base = this._season === "spring" ? 2200 : 4500;
+      this._nextBird = now + base + Math.random() * 5000;
+    }
+    if (night && now >= this._nextOwl) {
+      if (Math.random() < 0.4) this._playOwl();
+      this._nextOwl = now + 12000 + Math.random() * 18000;
+    }
+  }
+
+  async toggle() {
+    if (!this.inited) {
+      const ok = await this._init();
+      if (!ok) return false;
+    }
+    if (this.ctx.state === "suspended") await this.ctx.resume();
+    this.enabled = !this.enabled;
+    const now = this.ctx.currentTime;
+    this.master.gain.cancelScheduledValues(now);
+    this.master.gain.linearRampToValueAtTime(this.enabled ? 0.7 : 0, now + 0.4);
+    return this.enabled;
   }
 }
 
@@ -1035,9 +1225,13 @@ async function fetchRepos(username) {
 
 // ---------- App init ----------
 const garden = new Garden(document.getElementById("garden"));
+const audio = new AudioEngine();
 
 (function loop() {
   garden.tick();
+  audio.setWind(garden.wind);
+  audio.setContext(garden._lastTod || "day", garden.season);
+  audio.tick();
   requestAnimationFrame(loop);
 })();
 
@@ -1129,6 +1323,19 @@ async function grow() {
 growBtn.addEventListener("click", grow);
 usernameInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") grow();
+});
+
+// Sound toggle
+const soundBtn = document.getElementById("sound");
+soundBtn.addEventListener("click", async () => {
+  const on = await audio.toggle();
+  if (on === false && !audio.inited) {
+    soundBtn.title = "audio unsupported";
+    return;
+  }
+  soundBtn.textContent = on ? "🔊" : "🔇";
+  soundBtn.title = on ? "Mute ambient sound" : "Enable ambient sound";
+  soundBtn.classList.toggle("active", on);
 });
 
 // ---------- Default load: projects.json → demo fallback ----------
