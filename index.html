@@ -236,6 +236,37 @@ function mixHex(h1, h2, t) {
   return `rgb(${r},${g},${bl})`;
 }
 
+// Cubic bezier sample — returns point and tangent (unnormalized derivative).
+function bezierAt(p0, p1, p2, p3, t) {
+  const omt = 1 - t;
+  return {
+    x: omt * omt * omt * p0.x + 3 * omt * omt * t * p1.x + 3 * omt * t * t * p2.x + t * t * t * p3.x,
+    y: omt * omt * omt * p0.y + 3 * omt * omt * t * p1.y + 3 * omt * t * t * p2.y + t * t * t * p3.y,
+    tx: 3 * omt * omt * (p1.x - p0.x) + 6 * omt * t * (p2.x - p1.x) + 3 * t * t * (p3.x - p2.x),
+    ty: 3 * omt * omt * (p1.y - p0.y) + 6 * omt * t * (p2.y - p1.y) + 3 * t * t * (p3.y - p2.y),
+  };
+}
+
+// Stroke a cubic bezier as a sequence of short segments whose width tapers
+// linearly from baseW (at p0) to tipW (at p3). Relies on round lineCap to
+// bridge segment joins smoothly.
+function drawTaperedRoot(ctx, p0, p1, p2, p3, baseW, tipW, color, segs = 18) {
+  ctx.strokeStyle = color;
+  let prevX = p0.x, prevY = p0.y;
+  for (let i = 1; i <= segs; i++) {
+    const t = i / segs;
+    const omt = 1 - t;
+    const x = omt * omt * omt * p0.x + 3 * omt * omt * t * p1.x + 3 * omt * t * t * p2.x + t * t * t * p3.x;
+    const y = omt * omt * omt * p0.y + 3 * omt * omt * t * p1.y + 3 * omt * t * t * p2.y + t * t * t * p3.y;
+    ctx.lineWidth = Math.max(0.25, baseW + (tipW - baseW) * t);
+    ctx.beginPath();
+    ctx.moveTo(prevX, prevY);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    prevX = x; prevY = y;
+  }
+}
+
 // ---------- season (Northern Hemisphere) ----------
 function getSeason() {
   const m = new Date().getMonth();
@@ -563,37 +594,84 @@ class Plant {
       const depthT = 0.18 + rng() * 0.82;
       const ty = startY + topPadding + depthT * available;
 
-      // Control point for Bezier — pulls root outward so it looks organic
-      const cpx = this.x + (tx - this.x) * 0.3 + (rng() - 0.5) * 60;
-      const cpy = startY + (ty - startY) * 0.45;
+      // Cubic bezier for an organic winding main root.
+      const dxEnd = tx - this.x;
+      const dyEnd = ty - startY;
+      const side = dxEnd >= 0 ? 1 : -1;
+      const p0 = { x: this.x, y: startY + 1 };
+      const p1 = {
+        x: this.x + dxEnd * 0.18 + (rng() - 0.5) * 22,
+        y: startY + dyEnd * 0.32,
+      };
+      const p2 = {
+        x: this.x + dxEnd * 0.55 + side * (18 + rng() * 50),
+        y: startY + dyEnd * 0.7 + (rng() - 0.5) * 18,
+      };
+      const p3 = { x: tx, y: ty - avatarR - 1 };
 
-      // Draw tendril (taper by drawing two strokes: dark base, lighter highlight)
-      ctx.strokeStyle = "rgba(54, 32, 18, 0.92)";
-      ctx.lineWidth = 2.4;
       ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(this.x, startY + 1);
-      ctx.quadraticCurveTo(cpx, cpy, tx, ty - avatarR - 2);
-      ctx.stroke();
+      ctx.lineJoin = "round";
 
-      ctx.strokeStyle = "rgba(130, 82, 44, 0.45)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(this.x, startY + 1);
-      ctx.quadraticCurveTo(cpx, cpy, tx, ty - avatarR - 2);
-      ctx.stroke();
+      // Dark base stroke (thick → thin) then a lighter highlight threaded on top
+      // to suggest a rounded, tapered root body.
+      drawTaperedRoot(ctx, p0, p1, p2, p3, 4.4, 0.7, "rgba(42, 26, 14, 0.92)");
+      drawTaperedRoot(ctx, p0, p1, p2, p3, 2.2, 0.35, "rgba(122, 78, 42, 0.55)");
 
-      // Small side-rootlet for flavor
-      const sideAngle = (rng() - 0.5) * Math.PI * 0.6;
-      const sideLen = 14 + rng() * 10;
-      const midX = (this.x + tx) / 2;
-      const midY = (startY + ty) / 2;
-      ctx.strokeStyle = "rgba(74, 46, 26, 0.55)";
-      ctx.lineWidth = 0.9;
-      ctx.beginPath();
-      ctx.moveTo(midX, midY);
-      ctx.lineTo(midX + Math.cos(sideAngle) * sideLen, midY + Math.sin(sideAngle) * sideLen);
-      ctx.stroke();
+      // Fork branches — smaller roots spun off the main root, each tapering further.
+      const nForks = 2 + Math.floor(rng() * 2);
+      for (let f = 0; f < nForks; f++) {
+        const ft = 0.22 + (f + 0.35 + rng() * 0.3) * (0.72 / nForks);
+        const b = bezierAt(p0, p1, p2, p3, ft);
+        const tlen = Math.hypot(b.tx, b.ty) || 1;
+        const perpSign = rng() < 0.5 ? -1 : 1;
+        const forkAng = (0.45 + rng() * 0.55) * perpSign;
+        const cs = Math.cos(forkAng), sn = Math.sin(forkAng);
+        const forkLen = (20 + rng() * 28) * (1 - ft * 0.45);
+        const dirX = (b.tx * cs - b.ty * sn) / tlen;
+        const dirY = (b.tx * sn + b.ty * cs) / tlen;
+        const ex = b.x + dirX * forkLen;
+        const ey = b.y + dirY * forkLen + 3;
+        const fp0 = { x: b.x, y: b.y };
+        const fp1 = { x: b.x + dirX * forkLen * 0.35 + perpSign * 4, y: b.y + dirY * forkLen * 0.35 };
+        const fp2 = { x: b.x + dirX * forkLen * 0.7 + perpSign * 7, y: b.y + dirY * forkLen * 0.7 + 2 };
+        const fp3 = { x: ex, y: ey };
+        const forkBase = Math.max(1.1, 2.0 * (1 - ft * 0.5));
+        drawTaperedRoot(ctx, fp0, fp1, fp2, fp3, forkBase, 0.3, "rgba(42, 26, 14, 0.85)", 12);
+        drawTaperedRoot(ctx, fp0, fp1, fp2, fp3, Math.max(0.5, forkBase * 0.5), 0.2, "rgba(122, 78, 42, 0.4)", 12);
+
+        // Occasional sub-hair off the fork tip.
+        if (rng() < 0.65) {
+          const hairAng = forkAng + (rng() - 0.5) * 0.8;
+          const hlen = 6 + rng() * 8;
+          const hcs = Math.cos(hairAng), hsn = Math.sin(hairAng);
+          const hdx = (b.tx * hcs - b.ty * hsn) / tlen;
+          const hdy = (b.tx * hsn + b.ty * hcs) / tlen;
+          ctx.strokeStyle = "rgba(62, 38, 20, 0.7)";
+          ctx.lineWidth = 0.7;
+          ctx.beginPath();
+          ctx.moveTo(ex, ey);
+          ctx.lineTo(ex + hdx * hlen, ey + hdy * hlen + 2);
+          ctx.stroke();
+        }
+      }
+
+      // Tiny surface hairs along the main root for fuzz.
+      const nHairs = 3 + Math.floor(rng() * 3);
+      for (let h = 0; h < nHairs; h++) {
+        const ht = 0.15 + rng() * 0.75;
+        const bh = bezierAt(p0, p1, p2, p3, ht);
+        const tl = Math.hypot(bh.tx, bh.ty) || 1;
+        const ps = rng() < 0.5 ? -1 : 1;
+        const px = (-bh.ty / tl) * ps;
+        const py = (bh.tx / tl) * ps;
+        const hl = 3 + rng() * 5;
+        ctx.strokeStyle = "rgba(62, 38, 20, 0.55)";
+        ctx.lineWidth = 0.6;
+        ctx.beginPath();
+        ctx.moveTo(bh.x, bh.y);
+        ctx.lineTo(bh.x + px * hl, bh.y + py * hl + 1);
+        ctx.stroke();
+      }
 
       // Avatar disc
       const img = c.avatar_url ? getAvatarImage(c.avatar_url) : null;
