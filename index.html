@@ -502,7 +502,7 @@ class Plant {
     if (this.status === "mature" && this.height > this.maxHeight * 0.3) {
       const bloomP = Math.min(1, (this.height - this.maxHeight * 0.3) / (this.maxHeight * 0.7));
       const seasonScale = season === "spring" ? 1.15 : season === "winter" ? 0.8 : season === "autumn" ? 0.95 : 1;
-      const size = this.flower.size * bloomP * (isHover ? 1.18 : 1) * seasonScale;
+      const size = this.flower.size * bloomP * (isHover ? 1.18 : 1) * seasonScale * 1.5;
       ctx.save();
       ctx.translate(tip.x, tip.y);
       ctx.rotate(this.flower.phase + t * 0.00015);
