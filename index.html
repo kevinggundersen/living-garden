@@ -7,12 +7,12 @@
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
-    height: 100%;
-    overflow: hidden;
+    min-height: 100%;
     background: #0a1628;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     color: #e8e4d8;
   }
+  body { overflow-x: hidden; overflow-y: auto; }
   canvas { display: block; cursor: default; }
   canvas.hover { cursor: pointer; }
 
@@ -532,6 +532,135 @@ class Plant {
     const dy = y - this.hit.y;
     return dx * dx + dy * dy < this.hit.r * this.hit.r;
   }
+
+  drawRoots(ctx, rootsH, reveal, isNight) {
+    this.rootHits = [];
+    const contribs = this.contributors;
+    if (!contribs || !contribs.length) return;
+    const N = Math.min(contribs.length, 12);
+    const rng = mulberry32(hashStr(this.repo.name + ":roots"));
+    // Anchor at the plant's base; scroll-driven `reveal` handles visibility.
+    const startY = this.groundY;
+    const spanX = 220;
+    const topPadding = 56;
+    const available = Math.max(60, rootsH - topPadding - 40);
+    const avatarR = 14;
+    const clipBottom = startY + reveal * rootsH;
+
+    // Reveal: tendrils grow downward from startY as scroll progresses,
+    // and fade in/out together. Clip rect bottom tracks reveal linearly.
+    ctx.save();
+    ctx.globalAlpha = reveal;
+    ctx.beginPath();
+    ctx.rect(0, 0, 1e6, clipBottom);
+    ctx.clip();
+
+    for (let i = 0; i < N; i++) {
+      const c = contribs[i];
+      // Deterministic endpoint per index
+      const laneT = (i + 0.5 + (rng() - 0.5) * 0.3) / N;
+      const tx = this.x + (laneT - 0.5) * spanX + (rng() - 0.5) * 20;
+      const depthT = 0.18 + rng() * 0.82;
+      const ty = startY + topPadding + depthT * available;
+
+      // Control point for Bezier — pulls root outward so it looks organic
+      const cpx = this.x + (tx - this.x) * 0.3 + (rng() - 0.5) * 60;
+      const cpy = startY + (ty - startY) * 0.45;
+
+      // Draw tendril (taper by drawing two strokes: dark base, lighter highlight)
+      ctx.strokeStyle = "rgba(54, 32, 18, 0.92)";
+      ctx.lineWidth = 2.4;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(this.x, startY + 1);
+      ctx.quadraticCurveTo(cpx, cpy, tx, ty - avatarR - 2);
+      ctx.stroke();
+
+      ctx.strokeStyle = "rgba(130, 82, 44, 0.45)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(this.x, startY + 1);
+      ctx.quadraticCurveTo(cpx, cpy, tx, ty - avatarR - 2);
+      ctx.stroke();
+
+      // Small side-rootlet for flavor
+      const sideAngle = (rng() - 0.5) * Math.PI * 0.6;
+      const sideLen = 14 + rng() * 10;
+      const midX = (this.x + tx) / 2;
+      const midY = (startY + ty) / 2;
+      ctx.strokeStyle = "rgba(74, 46, 26, 0.55)";
+      ctx.lineWidth = 0.9;
+      ctx.beginPath();
+      ctx.moveTo(midX, midY);
+      ctx.lineTo(midX + Math.cos(sideAngle) * sideLen, midY + Math.sin(sideAngle) * sideLen);
+      ctx.stroke();
+
+      // Avatar disc
+      const img = c.avatar_url ? getAvatarImage(c.avatar_url) : null;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(tx, ty, avatarR, 0, Math.PI * 2);
+      ctx.closePath();
+      ctx.clip();
+      if (img && img._ready && !img._failed) {
+        try { ctx.drawImage(img, tx - avatarR, ty - avatarR, avatarR * 2, avatarR * 2); }
+        catch { /* tainted canvas — fall through to placeholder */ }
+      } else {
+        const hue = hashStr(c.login || c.name || "?") % 360;
+        ctx.fillStyle = `hsl(${hue}, 38%, 42%)`;
+        ctx.fillRect(tx - avatarR, ty - avatarR, avatarR * 2, avatarR * 2);
+        const initial = (c.name || c.login || "?").trim().charAt(0).toUpperCase();
+        ctx.fillStyle = "rgba(255,255,255,0.88)";
+        ctx.font = "bold 14px -apple-system, Segoe UI, Roboto, sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(initial, tx, ty + 0.5);
+      }
+      ctx.restore();
+
+      // Ring around avatar
+      ctx.strokeStyle = isNight ? "rgba(230, 220, 190, 0.7)" : "rgba(240, 235, 215, 0.85)";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(tx, ty, avatarR, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Name label
+      const rawLabel = c.name || c.login || "?";
+      const label = rawLabel.length > 20 ? rawLabel.slice(0, 19) + "\u2026" : rawLabel;
+      ctx.fillStyle = isNight ? "rgba(230, 224, 205, 0.85)" : "rgba(245, 240, 222, 0.92)";
+      ctx.font = "11px -apple-system, Segoe UI, Roboto, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      ctx.fillText(label, tx, ty + avatarR + 4);
+
+      // Register clickable hit region (avatar + label) if the contributor
+      // has a resolvable profile URL and the avatar is within the reveal clip.
+      if (c.html_url && ty <= clipBottom) {
+        const labelW = ctx.measureText(label).width;
+        this.rootHits.push({
+          cx: tx, cy: ty, r: avatarR,
+          lx: tx - labelW / 2 - 2,
+          ly: ty + avatarR + 4,
+          lw: labelW + 4,
+          lh: 14,
+          profile: c,
+        });
+      }
+    }
+
+    ctx.restore();
+  }
+
+  hitTestRoot(x, y) {
+    if (!this.rootHits || !this.rootHits.length) return null;
+    for (const h of this.rootHits) {
+      const dx = x - h.cx, dy = y - h.cy;
+      if (dx * dx + dy * dy <= h.r * h.r) return h.profile;
+      if (x >= h.lx && x <= h.lx + h.lw && y >= h.ly && y <= h.ly + h.lh) return h.profile;
+    }
+    return null;
+  }
 }
 
 // ---------- Butterfly ----------
@@ -799,6 +928,7 @@ class Garden {
     this.sunPos = { x: 0, y: 0 };
     this.sunClicks = 0;
     this.sunClickTime = 0;
+    this.rootsReveal = 0; // 0 = fully hidden (top of page), 1 = fully revealed
 
     this.resize();
     window.addEventListener("resize", () => this.resize());
@@ -812,6 +942,10 @@ class Garden {
       this.mouse.y = -9999;
     });
     canvas.addEventListener("click", (e) => {
+      if (this.hoverRoot && this.hoverRoot.html_url) {
+        window.open(this.hoverRoot.html_url, "_blank", "noopener,noreferrer");
+        return;
+      }
       if (this.hoverPlant && this.hoverPlant.repo.url && this.hoverPlant.repo.url !== "#") {
         window.open(this.hoverPlant.repo.url, "_blank");
         return;
@@ -865,10 +999,12 @@ class Garden {
     const dpr = window.devicePixelRatio || 1;
     this.w = window.innerWidth;
     this.h = window.innerHeight;
+    this.rootsH = Math.floor(this.h * 0.9);
+    this.totalH = this.h + this.rootsH;
     this.canvas.width = this.w * dpr;
-    this.canvas.height = this.h * dpr;
+    this.canvas.height = this.totalH * dpr;
     this.canvas.style.width = this.w + "px";
-    this.canvas.style.height = this.h + "px";
+    this.canvas.style.height = this.totalH + "px";
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.groundY = this.h * 0.82;
     this.layout();
@@ -1051,29 +1187,43 @@ class Garden {
     const isDark = tod.phase === "night" || tod.phase === "dawn";
     const season = this.season;
 
-    let groundC, grassC;
+    let groundC, grassC, soilC;
     if (isDark) {
       groundC = season === "winter" ? "#2a3540" : season === "autumn" ? "#2a1f15" : "#0f1a15";
       grassC = season === "winter" ? "rgba(130, 150, 170, 0.5)" : "rgba(40, 70, 55, 0.6)";
+      soilC = season === "winter" ? "#2a2018" : "#1c140b";
     } else if (season === "autumn") {
       groundC = "#5c4526";
       grassC = "rgba(185, 140, 80, 0.55)";
+      soilC = "#5c4526";
     } else if (season === "winter") {
       groundC = "#4a5560";
       grassC = "rgba(200, 210, 220, 0.55)";
+      soilC = "#4a3a2a";
     } else if (season === "spring") {
       groundC = "#4a6c3a";
       grassC = "rgba(135, 180, 95, 0.6)";
+      soilC = "#6b4a2a";
     } else {
       groundC = "#3a5c3a";
       grassC = "rgba(120, 160, 90, 0.55)";
+      soilC = "#5c3f22";
     }
     ctx.fillStyle = groundC;
-    ctx.fillRect(0, this.groundY, this.w, this.h - this.groundY);
+    ctx.fillRect(0, this.groundY, this.w, this.totalH - this.groundY);
+    ctx.fillStyle = soilC;
+    ctx.fillRect(0, this.h, this.w, this.totalH - this.h);
+
+    // Soil gets darker the deeper you go (toward the roots zone).
+    const deepGrad = ctx.createLinearGradient(0, this.groundY, 0, this.totalH);
+    deepGrad.addColorStop(0, "rgba(0, 0, 0, 0)");
+    deepGrad.addColorStop(1, "rgba(0, 0, 0, 0.55)");
+    ctx.fillStyle = deepGrad;
+    ctx.fillRect(0, this.groundY, this.w, this.totalH - this.groundY);
 
     if (season === "winter") {
       ctx.fillStyle = isDark ? "rgba(200, 215, 230, 0.2)" : "rgba(240, 245, 255, 0.55)";
-      ctx.fillRect(0, this.groundY, this.w, this.h - this.groundY);
+      ctx.fillRect(0, this.groundY, this.w, (this.h - this.groundY) + 6);
     }
 
     ctx.strokeStyle = grassC;
@@ -1103,7 +1253,7 @@ class Garden {
     this.wind += (this.windTarget - this.wind) * 0.02;
     this.windTarget *= 0.99;
 
-    this.ctx.clearRect(0, 0, this.w, this.h);
+    this.ctx.clearRect(0, 0, this.w, this.totalH);
     this.drawSky(tod);
     this.drawHills(tod);
 
@@ -1115,12 +1265,37 @@ class Garden {
 
     this.drawGround(tod);
 
+    // Scroll-driven roots reveal: 0 at the very top, 1 when scrolled past ~40% of viewport.
+    // Eased so starting to scroll smoothly animates the tendrils downward;
+    // returning to the very top fades them out.
+    const scrollY = window.scrollY || window.pageYOffset || 0;
+    const targetReveal = Math.min(1, scrollY / Math.max(80, this.h * 0.4));
+    this.rootsReveal += (targetReveal - this.rootsReveal) * 0.12;
+    if (this.rootsReveal < 0.002) this.rootsReveal = 0;
+
+    // Roots beneath the soil — drawn before the plants so flowers/leaves stay on top.
+    if (this.rootsReveal > 0.005) {
+      for (const plant of this.plants) {
+        plant.drawRoots(this.ctx, this.rootsH, this.rootsReveal, isNight);
+      }
+    }
+
     // Hover detection (last-drawn wins so tallest/nearest doesn't always hijack)
     this.hoverPlant = null;
     for (const plant of this.plants) {
       if (plant.hitTest(this.mouse.x, this.mouse.y)) this.hoverPlant = plant;
     }
-    this.canvas.classList.toggle("hover", !!this.hoverPlant);
+
+    // Contributor (root) hover — only when roots are sufficiently revealed
+    // so we don't register clicks on barely-visible avatars.
+    this.hoverRoot = null;
+    if (this.rootsReveal > 0.6) {
+      for (const plant of this.plants) {
+        const hit = plant.hitTestRoot(this.mouse.x, this.mouse.y);
+        if (hit) { this.hoverRoot = hit; break; }
+      }
+    }
+    this.canvas.classList.toggle("hover", !!this.hoverPlant || !!this.hoverRoot);
 
     for (const plant of this.plants) {
       plant.grow();
@@ -1410,6 +1585,185 @@ async function fetchRepos(username) {
     }));
 }
 
+// ---------- Contributor ("roots") fetch layer ----------
+// One network call per unique GitHub login across the whole garden.
+const userCache = new Map();
+async function fetchUserProfile(login) {
+  if (!login) return null;
+  if (userCache.has(login)) return userCache.get(login);
+  const k = `garden:gh:user:${login}`;
+  try {
+    const raw = localStorage.getItem(k);
+    if (raw) {
+      const c = JSON.parse(raw);
+      if (Date.now() - c.t < 86400000) { // 24h
+        userCache.set(login, c.data);
+        return c.data;
+      }
+    }
+  } catch {}
+  try {
+    const r = await fetch(`https://api.github.com/users/${encodeURIComponent(login)}`);
+    if (!r.ok) { userCache.set(login, null); return null; }
+    const x = await r.json();
+    const data = {
+      login,
+      name: x.name || login,
+      avatar_url: x.avatar_url,
+      html_url: x.html_url || `https://github.com/${login}`,
+    };
+    try { localStorage.setItem(k, JSON.stringify({ data, t: Date.now() })); } catch {}
+    userCache.set(login, data);
+    return data;
+  } catch {
+    userCache.set(login, null);
+    return null;
+  }
+}
+
+async function ghCached(cacheKey, url, ttl) {
+  try {
+    const raw = localStorage.getItem(cacheKey);
+    if (raw) {
+      const c = JSON.parse(raw);
+      if (Date.now() - c.t < ttl) return c.data;
+    }
+  } catch {}
+  try {
+    const r = await fetch(url);
+    if (!r.ok) return null;
+    const data = await r.json();
+    try { localStorage.setItem(cacheKey, JSON.stringify({ data, t: Date.now() })); } catch {}
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchContributorsApi(owner, repo) {
+  const data = await ghCached(
+    `garden:gh:contrib:${owner}/${repo}`,
+    `https://api.github.com/repos/${owner}/${repo}/contributors?per_page=30`,
+    3600000
+  );
+  if (!Array.isArray(data)) return [];
+  return data
+    .filter((u) => u && u.login)
+    .map((u) => ({ login: u.login, name: u.login }));
+}
+
+async function fetchCommitCoAuthors(owner, repo) {
+  const key = `garden:gh:coauth:${owner}/${repo}`;
+  // We store the parsed list directly (not raw commits) to keep LS small.
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) {
+      const c = JSON.parse(raw);
+      if (Date.now() - c.t < 3600000) return c.data;
+    }
+  } catch {}
+  let commits;
+  try {
+    const r = await fetch(`https://api.github.com/repos/${owner}/${repo}/commits?per_page=100`);
+    if (!r.ok) return [];
+    commits = await r.json();
+  } catch { return []; }
+  if (!Array.isArray(commits)) return [];
+  const re = /Co-Authored-By:\s*([^<]+?)\s*<([^>]+)>/gi;
+  const noreply = /^\d+\+([^@]+)@users\.noreply\.github\.com$/i;
+  const byKey = new Map();
+  for (const c of commits) {
+    const msg = (c && c.commit && c.commit.message) || "";
+    let m;
+    while ((m = re.exec(msg)) !== null) {
+      const name = m[1].trim();
+      const email = m[2].trim().toLowerCase();
+      const nrMatch = email.match(noreply);
+      const login = nrMatch ? nrMatch[1] : null;
+      const k = login ? `login:${login}` : `email:${email}`;
+      if (!byKey.has(k)) byKey.set(k, { login, email, name });
+    }
+  }
+  const list = Array.from(byKey.values());
+  try { localStorage.setItem(key, JSON.stringify({ data: list, t: Date.now() })); } catch {}
+  return list;
+}
+
+async function fetchIssueParticipants(owner, repo) {
+  const data = await ghCached(
+    `garden:gh:issues:${owner}/${repo}`,
+    `https://api.github.com/repos/${owner}/${repo}/issues?state=all&per_page=30`,
+    3600000
+  );
+  if (!Array.isArray(data)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const it of data) {
+    const login = it && it.user && it.user.login;
+    if (login && !seen.has(login)) { seen.add(login); out.push({ login, name: login }); }
+  }
+  return out;
+}
+
+async function aggregateContributors(plant) {
+  const parsed = parseGithubUrl(plant.repo && plant.repo.url);
+  if (!parsed) return [];
+  const { owner, repo } = parsed;
+  const [contribs, coauthors, issues] = await Promise.all([
+    fetchContributorsApi(owner, repo),
+    fetchCommitCoAuthors(owner, repo),
+    fetchIssueParticipants(owner, repo),
+  ]);
+  const byKey = new Map();
+  const add = (c) => {
+    if (!c) return;
+    const k = c.login ? `login:${c.login.toLowerCase()}` : c.email ? `email:${c.email.toLowerCase()}` : null;
+    if (!k) return;
+    if (!byKey.has(k)) byKey.set(k, { login: c.login || null, email: c.email || null, name: c.name || c.login });
+  };
+  contribs.forEach(add);
+  coauthors.forEach(add);
+  issues.forEach(add);
+  return Array.from(byKey.values());
+}
+
+async function hydrateContributors(plant) {
+  try {
+    const raw = await aggregateContributors(plant);
+    if (!raw.length) return;
+    const resolved = await Promise.all(
+      raw.map(async (c) => {
+        if (c.login) {
+          const profile = await fetchUserProfile(c.login);
+          if (profile) return profile;
+          return { login: c.login, name: c.name || c.login, avatar_url: null, html_url: `https://github.com/${c.login}` };
+        }
+        return { login: null, name: c.name || c.email, email: c.email, avatar_url: null, html_url: null };
+      })
+    );
+    plant.contributors = resolved.filter(Boolean);
+  } catch {
+    // Silent: no tendrils is an acceptable fallback (rate limit, offline, etc.)
+  }
+}
+
+// Canvas avatar cache — in-memory HTMLImageElement per URL.
+const avatarImgs = new Map();
+function getAvatarImage(url) {
+  if (!url) return null;
+  const existing = avatarImgs.get(url);
+  if (existing) return existing;
+  const img = new Image();
+  img._ready = false;
+  img._failed = false;
+  img.crossOrigin = "anonymous";
+  img.onload = () => { img._ready = true; };
+  img.onerror = () => { img._failed = true; };
+  img.src = url;
+  avatarImgs.set(url, img);
+  return img;
+}
+
 // ---------- App init ----------
 const garden = new Garden(document.getElementById("garden"));
 const audio = new AudioEngine();
@@ -1503,6 +1857,7 @@ async function grow() {
     }
     garden.setProjects(repos.map(normalizeProject));
     statusEl.textContent = `${repos.length} plants growing`;
+    garden.plants.forEach((p) => { hydrateContributors(p); });
   } catch (e) {
     statusEl.textContent = "error: " + e.message;
   }
@@ -1553,6 +1908,7 @@ async function loadDefault() {
 
     garden.setProjects(projects);
     if (data.github && !usernameInput.value) usernameInput.value = data.github;
+    garden.plants.forEach((p) => { hydrateContributors(p); });
     const parts = [`${projects.length} plants`];
     if (hydrated) parts.push(`${hydrated} live`);
     if (failed) parts.push(`${failed} offline`);
