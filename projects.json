@@ -8,14 +8,14 @@
     { "url": "https://github.com/kevinggundersen/global" },
 
     {
-      "name": "???",
+      "name": "Local-First Vault",
       "language": "???",
-      "description": "A sapling idea.",
+      "description": "A private-by-default knowledge garden and data store.",
       "status": "sapling"
     },
     {
       "name": "???",
-      "description": "A seed idea.",
+      "description": "A something cool.",
       "status": "seed"
     }
   ]
