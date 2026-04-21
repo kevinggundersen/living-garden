@@ -89,7 +89,8 @@
     transition: opacity 0.22s ease, transform 0.22s ease, left 0.28s ease, top 0.28s ease;
     pointer-events: none;
   }
-  .info.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
+  .info.show { opacity: 1; transform: translateY(0); }
+  .info.show a { pointer-events: auto; }
   .info h3 { font-size: 18px; margin-bottom: 6px; color: #f0ead8; font-weight: 600; }
   .info .lang {
     font-size: 11px;
@@ -1935,52 +1936,67 @@ function positionCard(plant) {
 }
 
 let lastHover = null;
-setInterval(() => {
-  if (garden.hoverPlant !== lastHover) {
-    lastHover = garden.hoverPlant;
-    if (garden.hoverPlant) {
-      const r = garden.hoverPlant.repo;
-      const status = r.status || "mature";
-      iName.textContent = r.name;
-      if (status === "sapling") {
-        iLang.textContent = r.language ? `planned · ${r.language}` : "planned";
-        iDot.style.background = "#7dc36b";
-      } else if (status === "seed") {
-        iLang.textContent = "seeded";
-        iDot.style.background = "#8b6f4e";
-      } else {
-        iLang.textContent = r.language || "—";
-        iDot.style.background = LANG_COLORS[r.language] || "#e78aa8";
-      }
-      if (r.image) {
-        iImg.src = r.image;
-        iImg.classList.add("visible");
-      } else {
-        iImg.classList.remove("visible");
-        iImg.src = "";
-      }
-      iDesc.textContent = r.description;
-      if (status === "mature") {
-        const days = Math.max(0, Math.round((Date.now() - r.pushed) / 86400000));
-        iStats.innerHTML = `<span>⭐ ${r.stars}</span><span>↻ ${days}d ago</span>`;
-      } else if (status === "sapling") {
-        iStats.innerHTML = `<span>🌱 growing idea</span>`;
-      } else {
-        iStats.innerHTML = `<span>🌰 planted seed</span>`;
-      }
-      if (r.url && r.url !== "#") {
-        iLink.href = r.url;
-        iLink.style.display = "inline-block";
-      } else {
-        iLink.style.display = "none";
-      }
-      positionCard(garden.hoverPlant);
-      info.classList.add("show");
-    } else {
-      info.classList.remove("show");
-    }
+let hideTimer = null;
+const HOVER_GRACE_MS = 180;
+
+function renderCard(plant) {
+  const r = plant.repo;
+  const status = r.status || "mature";
+  iName.textContent = r.name;
+  if (status === "sapling") {
+    iLang.textContent = r.language ? `planned · ${r.language}` : "planned";
+    iDot.style.background = "#7dc36b";
+  } else if (status === "seed") {
+    iLang.textContent = "seeded";
+    iDot.style.background = "#8b6f4e";
+  } else {
+    iLang.textContent = r.language || "—";
+    iDot.style.background = LANG_COLORS[r.language] || "#e78aa8";
   }
-}, 80);
+  if (r.image) {
+    iImg.src = r.image;
+    iImg.classList.add("visible");
+  } else {
+    iImg.classList.remove("visible");
+    iImg.src = "";
+  }
+  iDesc.textContent = r.description;
+  if (status === "mature") {
+    const days = Math.max(0, Math.round((Date.now() - r.pushed) / 86400000));
+    iStats.innerHTML = `<span>⭐ ${r.stars}</span><span>↻ ${days}d ago</span>`;
+  } else if (status === "sapling") {
+    iStats.innerHTML = `<span>🌱 growing idea</span>`;
+  } else {
+    iStats.innerHTML = `<span>🌰 planted seed</span>`;
+  }
+  if (r.url && r.url !== "#") {
+    iLink.href = r.url;
+    iLink.style.display = "inline-block";
+  } else {
+    iLink.style.display = "none";
+  }
+  positionCard(plant);
+}
+
+setInterval(() => {
+  const current = garden.hoverPlant;
+  if (current === lastHover) return;
+
+  if (current) {
+    if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+    lastHover = current;
+    renderCard(current);
+    info.classList.add("show");
+  } else if (!hideTimer) {
+    hideTimer = setTimeout(() => {
+      hideTimer = null;
+      if (!garden.hoverPlant) {
+        info.classList.remove("show");
+        lastHover = null;
+      }
+    }, HOVER_GRACE_MS);
+  }
+}, 40);
 
 // Grow from GitHub
 const statusEl = document.getElementById("status");
