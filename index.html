@@ -191,8 +191,9 @@
 
   /* CONTROLS */
   .controls {
-    position: fixed;
-    bottom: 20px; right: 20px;
+    position: absolute;
+    top: 100vh; right: 20px;
+    transform: translateY(calc(-100% - 20px));
     display: flex; gap: 6px; align-items: center;
     padding: 5px 5px 5px 14px;
     background: rgba(244, 239, 230, 0.86);
@@ -751,8 +752,11 @@
   /* MOBILE ADJUSTMENTS */
   @media (max-width: 700px) {
     .controls {
+      position: fixed;
+      top: auto;
       left: 12px; right: 12px;
       bottom: 12px;
+      transform: none;
       padding: 5px 5px 5px 10px;
       gap: 4px;
       justify-content: center;
