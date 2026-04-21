@@ -90,7 +90,6 @@
     pointer-events: none;
   }
   .info.show { opacity: 1; transform: translateY(0); }
-  .info.show a { pointer-events: auto; }
   .info h3 { font-size: 18px; margin-bottom: 6px; color: #f0ead8; font-weight: 600; }
   .info .lang {
     font-size: 11px;
@@ -125,16 +124,6 @@
     opacity: 0.7;
     margin-bottom: 14px;
   }
-  .info a {
-    display: inline-block;
-    color: #c9a876;
-    text-decoration: none;
-    border-bottom: 1px solid rgba(201, 168, 118, 0.35);
-    font-size: 13px;
-    padding-bottom: 1px;
-  }
-  .info a:hover { border-bottom-color: #c9a876; }
-
   .hint {
     position: fixed;
     bottom: 22px;
@@ -175,7 +164,6 @@
     <img id="i-img" alt="" />
     <p id="i-desc"></p>
     <div class="stats" id="i-stats"></div>
-    <a id="i-link" href="" target="_blank" rel="noopener">Visit repo →</a>
   </div>
 
   <div class="hint">hover a plant · click to open · each repo grows with its activity</div>
@@ -1918,7 +1906,6 @@ const iLang = document.getElementById("i-lang");
 const iDot = document.getElementById("i-dot");
 const iDesc = document.getElementById("i-desc");
 const iStats = document.getElementById("i-stats");
-const iLink = document.getElementById("i-link");
 const iImg = document.getElementById("i-img");
 
 function positionCard(plant) {
@@ -1968,12 +1955,6 @@ function renderCard(plant) {
     iStats.innerHTML = `<span>🌱 growing idea</span>`;
   } else {
     iStats.innerHTML = `<span>🌰 planted seed</span>`;
-  }
-  if (r.url && r.url !== "#") {
-    iLink.href = r.url;
-    iLink.style.display = "inline-block";
-  } else {
-    iLink.style.display = "none";
   }
   positionCard(plant);
 }
