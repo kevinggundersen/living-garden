@@ -91,8 +91,18 @@
   }
   .topnav a:hover, .topnav .navlink:hover { background: rgba(26,26,24,0.07); }
   @media (max-width: 700px) {
-    .topnav .brand { padding: 6px 8px 6px 12px; font-size: 15px; }
-    .topnav a, .topnav .navlink { padding: 7px 10px; font-size: 12.5px; }
+    .topnav {
+      left: 8px; right: 8px;
+      transform: none;
+      max-width: calc(100vw - 16px);
+      justify-content: center;
+      padding: 3px;
+      gap: 0;
+      overflow: hidden;
+    }
+    .topnav .brand { display: none; }
+    .topnav .sep { display: none; }
+    .topnav a, .topnav .navlink { padding: 6px 7px; font-size: 11.5px; }
   }
 
   /* HERO */
@@ -151,7 +161,10 @@
   }
   .hero .tagline b { font-weight: 500; color: var(--ink); }
   @media (max-width: 700px) {
-    .hero { left: 4vw; right: 4vw; max-width: none; top: 90px; padding: 22px 22px 20px; }
+    .hero { left: 4vw; right: 4vw; max-width: none; top: 72px; padding: 16px 18px 14px; }
+    .hero h1 { font-size: clamp(28px, 7.4vw, 40px); margin-bottom: 10px; }
+    .hero .kicker { margin-bottom: 10px; font-size: 10px; }
+    .hero .tagline { display: none; }
   }
 
   .scrollhint {
@@ -276,7 +289,11 @@
     color: var(--ink);
     letter-spacing: -0.01em;
     line-height: 1.05;
+    pointer-events: auto;
+    cursor: pointer;
+    transition: color 0.15s;
   }
+  .info h3:hover { color: var(--moss); }
   .info .lang {
     font-family: var(--mono);
     font-size: 10.5px;
@@ -729,6 +746,56 @@
     background: var(--paper);
     color: var(--ink);
     box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+  }
+
+  /* MOBILE ADJUSTMENTS */
+  @media (max-width: 700px) {
+    .controls {
+      left: 12px; right: 12px;
+      bottom: 12px;
+      padding: 5px 5px 5px 10px;
+      gap: 4px;
+      justify-content: center;
+    }
+    .controls .prefix { display: none; }
+    .controls input { width: auto; flex: 1 1 0; min-width: 0; font-size: 12px; }
+    .controls button#grow { padding: 7px 12px; font-size: 11.5px; }
+    .controls .status { display: none; }
+
+    .scrollhint { display: none; }
+
+    .info {
+      width: calc(100vw - 24px);
+      max-width: 320px;
+      padding: 16px 18px 14px;
+    }
+    .info h3 { font-size: 22px; }
+
+    .tweaks-panel {
+      left: 12px; right: 12px;
+      width: auto;
+      top: 72px;
+    }
+
+    .section-head {
+      flex-wrap: wrap;
+      gap: 8px 14px;
+      padding-top: 80px;
+      margin-bottom: 28px;
+    }
+    .section-title { font-size: 28px; }
+    .section-aside { margin-left: 0; width: 100%; }
+
+    .about-portrait { max-width: 260px; width: 100%; margin: 0 auto; }
+    .about-body p { font-size: 19px; }
+    .about-meta { grid-template-columns: 1fr; gap: 18px; margin-top: 28px; }
+
+    .contact { padding: 40px 0 60px; }
+    .contact .links a { font-size: 18px; padding: 16px 0; gap: 12px; }
+    .contact .links a .icon { width: 18px; height: 18px; }
+    .contact .links a .handle { font-size: 10px; }
+
+    .colophon { padding: 24px 0 32px; gap: 12px; }
   }
 
 </style>
@@ -1739,6 +1806,8 @@ class Garden {
     this.season = getSeason();
     this.mouse = { x: -9999, y: -9999 };
     this.hoverPlant = null;
+    this.selectedPlant = null;
+    this.touchMode = false;
     this.wind = 0;
     this.windTarget = 0;
     this.phoenixes = [];
@@ -1761,18 +1830,47 @@ class Garden {
       this.mouse.x = -9999;
       this.mouse.y = -9999;
     });
+    canvas.addEventListener("touchstart", () => { this.touchMode = true; }, { passive: true });
     canvas.addEventListener("click", (e) => {
-      if (this.hoverRoot && this.hoverRoot.html_url) {
-        window.open(this.hoverRoot.html_url, "_blank", "noopener,noreferrer");
-        return;
-      }
-      if (this.hoverPlant && this.hoverPlant.repo.url && this.hoverPlant.repo.url !== "#") {
-        window.open(this.hoverPlant.repo.url, "_blank");
-        return;
-      }
       const r = canvas.getBoundingClientRect();
       const mx = e.clientX - r.left;
       const my = e.clientY - r.top;
+
+      let clickedPlant = null;
+      for (const plant of this.plants) {
+        if (plant.hitTest(mx, my)) clickedPlant = plant;
+      }
+      let clickedRoot = null;
+      if (this.rootsReveal > 0.6) {
+        for (const plant of this.plants) {
+          const hit = plant.hitTestRoot(mx, my);
+          if (hit) { clickedRoot = hit; break; }
+        }
+      }
+
+      if (clickedRoot && clickedRoot.html_url) {
+        window.open(clickedRoot.html_url, "_blank", "noopener,noreferrer");
+        return;
+      }
+
+      if (clickedPlant && clickedPlant.repo.url && clickedPlant.repo.url !== "#") {
+        if (this.touchMode) {
+          this.selectedPlant = clickedPlant;
+          this.mouse.x = mx;
+          this.mouse.y = my;
+          return;
+        }
+        window.open(clickedPlant.repo.url, "_blank");
+        return;
+      }
+
+      if (this.touchMode) {
+        this.selectedPlant = null;
+        this.mouse.x = -9999;
+        this.mouse.y = -9999;
+        return;
+      }
+
       const dx = mx - this.sunPos.x;
       const dy = my - this.sunPos.y;
       if (Math.hypot(dx, dy) < 36) {
@@ -2644,6 +2742,10 @@ const audio = new AudioEngine();
 // Info card
 const info = document.getElementById("info");
 const iName = document.getElementById("i-name");
+iName.addEventListener("click", () => {
+  const r = lastHover && lastHover.repo;
+  if (r && r.url && r.url !== "#") window.open(r.url, "_blank", "noopener,noreferrer");
+});
 const iLang = document.getElementById("i-lang");
 const iDot = document.getElementById("i-dot");
 const iDesc = document.getElementById("i-desc");
