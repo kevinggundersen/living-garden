@@ -15,9 +15,10 @@
       "status": "sapling"
     },
     {
-      "name": "???",
-      "description": "A something cool.",
-      "status": "seed"
+      "name": "VPS",
+      "language": "Python",
+      "description": "A Visual Positioning System for robotics and AR.",
+      "status": "sapling"
     }
   ]
 }

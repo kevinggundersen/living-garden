@@ -324,6 +324,37 @@
     margin-bottom: 14px;
     text-wrap: pretty;
   }
+  /* SOIL TOOLTIP (pebbles + burrows) */
+  .soil-tip {
+    position: fixed;
+    left: 0; top: 0;
+    padding: 7px 12px;
+    background: rgba(244, 239, 230, 0.96);
+    backdrop-filter: blur(14px) saturate(1.3);
+    -webkit-backdrop-filter: blur(14px) saturate(1.3);
+    border: 1px solid rgba(26,26,24,0.08);
+    border-radius: 10px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 10px 28px rgba(0,0,0,0.1);
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--ink-2);
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+    z-index: 40;
+    opacity: 0;
+    transform: translateY(-4px);
+    transition: opacity 0.18s ease, transform 0.18s ease, left 0.12s linear, top 0.12s linear;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .soil-tip.show { opacity: 1; transform: translateY(0); }
+  .soil-tip .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .soil-tip .k { color: var(--stone); text-transform: uppercase; letter-spacing: 0.1em; font-size: 10px; }
+  .soil-tip .v { color: var(--ink); font-weight: 500; }
+  .soil-tip .sep { width: 1px; height: 10px; background: rgba(26,26,24,0.12); }
+
   .info .stats {
     display: flex;
     gap: 14px;
@@ -846,6 +877,8 @@
   <p id="i-desc"></p>
   <div class="stats" id="i-stats"></div>
 </div>
+
+<div class="soil-tip" id="soil-tip"></div>
 
 <div class="tweaks-panel" id="tweaks-panel">
   <h4>Tweaks <button id="tweaks-close" aria-label="Close">×</button></h4>
@@ -1800,6 +1833,237 @@ class OwlShadow {
   }
 }
 
+// ---------- Soil life ----------
+
+class Worm {
+  constructor(w, groundY, rootsH, seed) {
+    const rng = mulberry32(seed);
+    this.rng = rng;
+    this.w = w;
+    this.phase = rng() * Math.PI * 2;
+    // Slow, barely-perceptible crawl through the soil.
+    this.speed = 0.04 + rng() * 0.06;
+    this.dir = rng() < 0.5 ? 1 : -1;
+    this.yT = 0.15 + rng() * 0.75;
+    this.targetYT = this.yT;
+    this.x = rng() * w;
+    this.segCount = 10;
+    this.segLen = 5;
+    this.y = groundY + 40 + this.yT * (rootsH - 80);
+  }
+  reflow(w, groundY, rootsH) {
+    this.w = w;
+    this.y = groundY + 40 + this.yT * (rootsH - 80);
+  }
+  update(w, groundY, rootsH) {
+    this.w = w;
+    // Gentle body undulation, independent of travel speed.
+    this.phase += 0.025;
+    this.x += this.dir * this.speed;
+    // Very rare, very slight vertical drift — looks like a worm settling.
+    // Nudge the target a small amount near the current depth (not a big jump).
+    if (this.rng() < 0.0015) {
+      const nudge = (this.rng() - 0.5) * 0.18;
+      this.targetYT = Math.max(0.08, Math.min(0.92, this.yT + nudge));
+    }
+    this.yT += (this.targetYT - this.yT) * 0.0004;
+    this.y = groundY + 40 + this.yT * (rootsH - 80);
+    if (this.dir > 0 && this.x > w + 40) this.x = -40;
+    if (this.dir < 0 && this.x < -40) this.x = w + 40;
+  }
+  draw(ctx, isDark) {
+    ctx.strokeStyle = isDark ? "rgba(190, 125, 115, 0.55)" : "rgba(175, 92, 82, 0.72)";
+    ctx.lineCap = "round";
+    for (let i = 0; i < this.segCount - 1; i++) {
+      const t0 = i / (this.segCount - 1);
+      const x0 = this.x - this.dir * i * this.segLen;
+      const x1 = this.x - this.dir * (i + 1) * this.segLen;
+      const y0 = this.y + Math.sin(this.phase + i * 0.85) * 1.6;
+      const y1 = this.y + Math.sin(this.phase + (i + 1) * 0.85) * 1.6;
+      ctx.lineWidth = Math.max(1, 3.2 * (1 - Math.abs(t0 - 0.5) * 1.2));
+      ctx.beginPath();
+      ctx.moveTo(x0, y0);
+      ctx.lineTo(x1, y1);
+      ctx.stroke();
+    }
+  }
+}
+
+class PillBug {
+  constructor(w, groundY, rootsH, seed) {
+    const rng = mulberry32(seed);
+    this.rng = rng;
+    this.w = w;
+    this.x = rng() * w;
+    this.yT = 0.22 + rng() * 0.65;
+    this.y = groundY + 60 + this.yT * (rootsH - 120);
+    this.dir = rng() < 0.5 ? 1 : -1;
+    this.speed = 0.12 + rng() * 0.18;
+    this.phase = rng() * Math.PI * 2;
+    this.pauseUntil = 0;
+  }
+  reflow(w, groundY, rootsH) {
+    this.w = w;
+    this.y = groundY + 60 + this.yT * (rootsH - 120);
+  }
+  update(w, groundY, rootsH) {
+    this.w = w;
+    this.y = groundY + 60 + this.yT * (rootsH - 120);
+    const now = Date.now();
+    if (now < this.pauseUntil) return;
+    this.phase += 0.14;
+    this.x += this.dir * this.speed;
+    if (this.rng() < 0.0015) this.pauseUntil = now + 500 + this.rng() * 1500;
+    if (this.rng() < 0.0012) this.dir *= -1;
+    if (this.x < -15) this.x = w + 10;
+    if (this.x > w + 15) this.x = -10;
+  }
+  draw(ctx, isDark) {
+    const bob = Math.sin(this.phase) * 0.6;
+    ctx.save();
+    ctx.translate(this.x, this.y + bob);
+    ctx.fillStyle = isDark ? "rgba(70, 58, 56, 0.88)" : "rgba(92, 72, 60, 0.92)";
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 5, 3.2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = isDark ? "rgba(25, 18, 18, 0.55)" : "rgba(40, 28, 22, 0.45)";
+    ctx.lineWidth = 0.7;
+    for (let i = -2; i <= 2; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i * 1.3, -2.6);
+      ctx.lineTo(i * 1.3, 2.6);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+class Mole {
+  constructor(w, groundY, rootsH) {
+    this.reset(w, groundY, rootsH, true);
+  }
+  reset(w, groundY, rootsH, initial) {
+    this.w = w;
+    this.state = "waiting";
+    const base = initial ? 5000 : 12000;
+    this.nextStart = Date.now() + base + Math.random() * 22000;
+    this.dir = Math.random() < 0.5 ? 1 : -1;
+    this.x = this.dir > 0 ? -50 : w + 50;
+    this.yT = 0.35 + Math.random() * 0.45;
+    this.y = groundY + 120 + this.yT * Math.max(60, rootsH - 240);
+    this.speed = 1.1 + Math.random() * 0.5;
+    this.trail = [];
+  }
+  reflow(w, groundY, rootsH) {
+    this.w = w;
+    this.y = groundY + 120 + this.yT * Math.max(60, rootsH - 240);
+  }
+  update(w, groundY, rootsH) {
+    this.w = w;
+    const now = Date.now();
+    if (this.state === "waiting") {
+      if (now >= this.nextStart) this.state = "moving";
+      return;
+    }
+    this.x += this.dir * this.speed;
+    // Subtle vertical bob as the mole noses through the soil
+    this.y += Math.sin(now * 0.004 + this.dir) * 0.15;
+    this.trail.push({ x: this.x, y: this.y, life: 0 });
+    for (const p of this.trail) p.life++;
+    this.trail = this.trail.filter((p) => p.life < 90);
+    if ((this.dir > 0 && this.x > w + 70) || (this.dir < 0 && this.x < -70)) {
+      this.reset(w, groundY, rootsH, false);
+    }
+  }
+  draw(ctx, isDark) {
+    if (this.state !== "moving") return;
+    for (const p of this.trail) {
+      const a = 1 - p.life / 90;
+      ctx.fillStyle = isDark ? `rgba(0, 0, 0, ${0.32 * a})` : `rgba(30, 18, 10, ${0.36 * a})`;
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y, 13, 4.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    if (this.dir < 0) ctx.scale(-1, 1);
+    ctx.fillStyle = isDark ? "rgba(28, 22, 22, 0.92)" : "rgba(42, 30, 26, 0.94)";
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 14, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(12, 0, 4.2, 3.2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(230, 150, 150, 0.9)";
+    ctx.beginPath();
+    ctx.arc(15.2, 0, 1.2, 0, Math.PI * 2);
+    ctx.fill();
+    // Tiny eye hint
+    ctx.fillStyle = "rgba(10, 6, 6, 0.9)";
+    ctx.beginPath();
+    ctx.arc(6, -2, 0.6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+class Pebble {
+  constructor(x, y, language, color, count) {
+    this.x = x;
+    this.y = y;
+    this.language = language;
+    this.color = color;
+    this.count = count;
+    const rng = mulberry32(hashStr(language + ":pebble"));
+    this.rx = 11 + Math.min(6, count) * 1.4 + rng() * 2.5;
+    this.ry = this.rx * (0.55 + rng() * 0.12);
+    this.rot = (rng() - 0.5) * 0.6;
+    this.hover = 0;
+  }
+  update(isHovered) {
+    const target = isHovered ? 1 : 0;
+    this.hover += (target - this.hover) * 0.15;
+  }
+  draw(ctx, isDark) {
+    ctx.save();
+    ctx.translate(this.x, this.y - this.hover * 1.5);
+    ctx.rotate(this.rot);
+    const grd = ctx.createLinearGradient(0, -this.ry, 0, this.ry);
+    if (isDark) {
+      grd.addColorStop(0, "rgba(115, 108, 96, 0.95)");
+      grd.addColorStop(1, "rgba(55, 50, 44, 0.95)");
+    } else {
+      grd.addColorStop(0, "rgba(198, 188, 172, 0.95)");
+      grd.addColorStop(1, "rgba(128, 114, 96, 0.95)");
+    }
+    ctx.fillStyle = grd;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, this.rx, this.ry, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = isDark ? "rgba(165, 158, 148, 0.55)" : "rgba(232, 224, 208, 0.7)";
+    ctx.beginPath();
+    ctx.ellipse(-this.rx * 0.32, -this.ry * 0.48, this.rx * 0.3, this.ry * 0.2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    if (this.hover > 0.01) {
+      ctx.globalAlpha = this.hover * 0.9;
+      ctx.strokeStyle = "rgba(244, 239, 230, 0.75)";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, this.rx + 2.5, this.ry + 2.5, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+  }
+  hitTest(mx, my) {
+    const dx = mx - this.x;
+    const dy = my - this.y;
+    const rx = Math.max(this.rx, 14);
+    const ry = Math.max(this.ry, 10);
+    return (dx * dx) / (rx * rx) + (dy * dy) / (ry * ry) <= 1;
+  }
+}
+
 class Garden {
   constructor(canvas) {
     this.canvas = canvas;
@@ -1822,6 +2086,13 @@ class Garden {
     this.sunClicks = 0;
     this.sunClickTime = 0;
     this.rootsReveal = 0; // 0 = fully hidden (top of page), 1 = fully revealed
+
+    // Soil life
+    this.pebbles = [];
+    this.worms = [];
+    this.pillbugs = [];
+    this.mole = null;
+    this.hoverSoil = null; // { kind: "pebble", obj }
 
     this.resize();
     window.addEventListener("resize", () => this.resize());
@@ -1855,6 +2126,22 @@ class Garden {
       if (clickedRoot && clickedRoot.html_url) {
         window.open(clickedRoot.html_url, "_blank", "noopener,noreferrer");
         return;
+      }
+
+      // Pebbles — filter the projects list by that language, then scroll
+      for (const p of this.pebbles) {
+        if (p.hitTest(mx, my)) {
+          const all = document.querySelector('#projects-filters button[data-f="all"]');
+          if (all && !all.classList.contains("active")) all.click();
+          const search = document.getElementById("projects-search-input");
+          if (search) {
+            search.value = p.language;
+            search.dispatchEvent(new Event("input"));
+          }
+          const tgt = document.getElementById("projects");
+          if (tgt) tgt.scrollIntoView({ behavior: "smooth", block: "start" });
+          return;
+        }
       }
 
       if (clickedPlant && clickedPlant.repo.url && clickedPlant.repo.url !== "#") {
@@ -1930,6 +2217,65 @@ class Garden {
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     this.groundY = this.h * 0.82;
     this.layout();
+    this.layoutSoil();
+  }
+
+  buildSoil() {
+    // Pebbles — one per unique language, sized by repo count
+    const langCounts = new Map();
+    const repos = this.repos || [];
+    for (const r of repos) {
+      if ((r.status || "mature") !== "mature") continue;
+      if (!r.language || !LANG_COLORS[r.language]) continue;
+      langCounts.set(r.language, (langCounts.get(r.language) || 0) + 1);
+    }
+    const langs = [...langCounts.entries()].sort((a, b) => b[1] - a[1]);
+    this.pebbles = langs.map(([lang, count]) => {
+      const color = LANG_COLORS[lang] || "#b9b0a0";
+      return new Pebble(0, 0, lang, color, count);
+    });
+
+    // Fauna — counts scale gently with repo count
+    const n = Math.max(6, repos.length);
+    const wormN = Math.min(5, Math.max(2, Math.floor(n / 3)));
+    const bugN = Math.min(7, Math.max(3, Math.floor(n / 2)));
+    this.worms = Array.from({ length: wormN }, (_, i) =>
+      new Worm(this.w, this.groundY, this.rootsH, 7919 + i * 137)
+    );
+    this.pillbugs = Array.from({ length: bugN }, (_, i) =>
+      new PillBug(this.w, this.groundY, this.rootsH, 104729 + i * 211)
+    );
+    this.mole = new Mole(this.w, this.groundY, this.rootsH);
+
+    this.layoutSoil();
+  }
+
+  layoutSoil() {
+    const groundY = this.groundY;
+    const soilBottom = this.totalH;
+
+    // Pebbles scattered through the soil (not on the surface). Each one gets a
+    // deterministic position inside the soil band, avoiding a small "apron"
+    // just below the grass line so they feel buried rather than resting on top.
+    if (this.pebbles && this.pebbles.length) {
+      const pebs = this.pebbles;
+      const bandTop = groundY + 40;
+      const bandBot = soilBottom - 40;
+      const bandH = Math.max(60, bandBot - bandTop);
+      const marginX = 40;
+      const availW = Math.max(1, this.w - marginX * 2);
+      for (let i = 0; i < pebs.length; i++) {
+        const p = pebs[i];
+        const rng = mulberry32(hashStr(p.language + ":pebble:pos2"));
+        p.x = marginX + rng() * availW;
+        p.y = bandTop + rng() * bandH;
+      }
+    }
+
+    // Fauna — keep their Y proportional to the soil band.
+    if (this.worms) for (const w of this.worms) w.reflow(this.w, groundY, this.rootsH);
+    if (this.pillbugs) for (const b of this.pillbugs) b.reflow(this.w, groundY, this.rootsH);
+    if (this.mole) this.mole.reflow(this.w, groundY, this.rootsH);
   }
 
   setProjects(repos) {
@@ -1955,6 +2301,8 @@ class Garden {
       season === "autumn" ? 50 :
       season === "spring" ? 45 : 50;
     this.particles = Array.from({ length: particleN }, () => new Particle(this.w, this.h, particleType));
+
+    this.buildSoil();
   }
 
   layout() {
@@ -2195,6 +2543,24 @@ class Garden {
     this.rootsReveal += (targetReveal - this.rootsReveal) * 0.12;
     if (this.rootsReveal < 0.002) this.rootsReveal = 0;
 
+    // Hover detection (last-drawn wins so tallest/nearest doesn't always hijack)
+    this.hoverPlant = null;
+    for (const plant of this.plants) {
+      if (plant.hitTest(this.mouse.x, this.mouse.y)) this.hoverPlant = plant;
+    }
+
+    // Soil feature hover — pebbles only now, gated on scroll so you can't
+    // hover a buried stone before it's even in view.
+    this.hoverSoil = null;
+    if (this.rootsReveal > 0.1) {
+      for (const p of this.pebbles) {
+        if (p.hitTest(this.mouse.x, this.mouse.y)) {
+          this.hoverSoil = { kind: "pebble", obj: p };
+          break;
+        }
+      }
+    }
+
     // Roots beneath the soil — drawn before the plants so flowers/leaves stay on top.
     if (this.rootsReveal > 0.005) {
       for (const plant of this.plants) {
@@ -2202,10 +2568,32 @@ class Garden {
       }
     }
 
-    // Hover detection (last-drawn wins so tallest/nearest doesn't always hijack)
-    this.hoverPlant = null;
-    for (const plant of this.plants) {
-      if (plant.hitTest(this.mouse.x, this.mouse.y)) this.hoverPlant = plant;
+    // Pebbles — buried in the soil band. Fade in with scroll alongside fauna.
+    const soilAlpha = Math.min(1, Math.max(0, (this.rootsReveal - 0.05) / 0.35));
+    if (soilAlpha > 0.01) {
+      this.ctx.save();
+      this.ctx.globalAlpha = soilAlpha;
+      for (const p of this.pebbles) {
+        p.update(this.hoverSoil && this.hoverSoil.obj === p);
+        p.draw(this.ctx, isNight);
+      }
+      // Fauna — worms, pill bugs, and the occasional mole.
+      for (const w of this.worms) {
+        w.update(this.w, this.groundY, this.rootsH);
+        w.draw(this.ctx, isNight);
+      }
+      for (const bug of this.pillbugs) {
+        bug.update(this.w, this.groundY, this.rootsH);
+        bug.draw(this.ctx, isNight);
+      }
+      if (this.mole) {
+        this.mole.update(this.w, this.groundY, this.rootsH);
+        this.mole.draw(this.ctx, isNight);
+      }
+      this.ctx.restore();
+    } else {
+      // Advance pebble hover easing even while faded out.
+      for (const p of this.pebbles) p.update(false);
     }
 
     // Contributor (root) hover — only when roots are sufficiently revealed
@@ -2217,7 +2605,7 @@ class Garden {
         if (hit) { this.hoverRoot = hit; break; }
       }
     }
-    this.canvas.classList.toggle("hover", !!this.hoverPlant || !!this.hoverRoot);
+    this.canvas.classList.toggle("hover", !!this.hoverPlant || !!this.hoverRoot || !!this.hoverSoil);
 
     for (const plant of this.plants) {
       plant.grow();
@@ -2824,6 +3212,51 @@ setInterval(() => {
         lastHover = null;
       }
     }, HOVER_GRACE_MS);
+  }
+}, 40);
+
+// Soil tooltip (pebbles + burrows)
+const soilTip = document.getElementById("soil-tip");
+let lastSoilKey = null;
+
+function renderSoilTip(hover) {
+  const canvas = document.getElementById("garden");
+  const r = canvas.getBoundingClientRect();
+  const obj = hover.obj;
+  const anchorX = r.left + obj.x;
+  const anchorY = r.top + obj.y;
+
+  const count = obj.count;
+  soilTip.innerHTML =
+    '<span class="v">' + obj.language + '</span>' +
+    '<span class="sep"></span>' +
+    '<span class="k">' + count + ' ' + (count === 1 ? "repo" : "repos") + '</span>';
+
+  const tipW = soilTip.offsetWidth || 180;
+  const tipH = soilTip.offsetHeight || 30;
+  const gap = 10;
+  let left = anchorX - tipW / 2;
+  const topOffset = (obj.ry || 10) + 4;
+  let top = anchorY - tipH - topOffset - gap;
+  left = Math.max(8, Math.min(window.innerWidth - tipW - 8, left));
+  if (top < 8) top = anchorY + topOffset + gap;
+  soilTip.style.left = left + "px";
+  soilTip.style.top = top + "px";
+}
+
+setInterval(() => {
+  const hover = garden.hoverSoil;
+  const key = hover ? "pebble:" + hover.obj.language : null;
+  if (key === lastSoilKey && hover) {
+    renderSoilTip(hover);
+    return;
+  }
+  lastSoilKey = key;
+  if (hover) {
+    renderSoilTip(hover);
+    soilTip.classList.add("show");
+  } else {
+    soilTip.classList.remove("show");
   }
 }, 40);
 
